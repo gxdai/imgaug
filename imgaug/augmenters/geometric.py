@@ -78,6 +78,7 @@ _AFFINE_MODE_SKIMAGE_TO_CV2 = {
 }
 
 
+@iap._prefetchable
 def _handle_order_arg(order, backend):
     # Peformance in skimage for Affine:
     #  1.0x order 0
@@ -122,6 +123,7 @@ def _handle_order_arg(order, backend):
         "StochasticParameter, got %s." % (type(order),))
 
 
+@iap._prefetchable
 def _handle_cval_arg(cval):
     if cval == ia.ALL:
         # TODO change this so that it is dynamically created per image
@@ -134,6 +136,7 @@ def _handle_cval_arg(cval):
 
 # currently used for Affine and PiecewiseAffine
 # TODO use iap.handle_categorical_string_param() here
+@iap._prefetchable_str
 def _handle_mode_arg(mode):
     if mode == ia.ALL:
         return iap.Choice(["constant", "edge", "symmetric",
@@ -542,7 +545,7 @@ def generate_jigsaw_destinations(nb_rows, nb_cols, max_steps, seed,
     """
     assert connectivity in (4, 8), (
         "Expected connectivity of 4 or 8, got %d." % (connectivity,))
-    random_state = iarandom.RNG(seed)
+    random_state = iarandom.RNG.create_if_not_rng_(seed)
     steps = random_state.integers(0, max_steps, size=(nb_rows, nb_cols),
                                   endpoint=True)
     directions = random_state.integers(0, connectivity,
@@ -3588,6 +3591,7 @@ class PerspectiveTransform(meta.Augmenter):
     # TODO unify this somehow with the global _handle_mode_arg() that is
     #      currently used for Affine and PiecewiseAffine
     @classmethod
+    @iap._prefetchable_str
     def _handle_mode_arg(cls, mode):
         available_modes = [cv2.BORDER_REPLICATE, cv2.BORDER_CONSTANT]
         available_modes_str = ["replicate", "constant"]
@@ -4269,6 +4273,7 @@ class ElasticTransformation(meta.Augmenter):
         self._cval_segmentation_maps = 0
 
     @classmethod
+    @iap._prefetchable
     def _handle_order_arg(cls, order):
         if order == ia.ALL:
             return iap.Choice([0, 1, 2, 3, 4, 5])
@@ -4277,6 +4282,7 @@ class ElasticTransformation(meta.Augmenter):
             list_to_choice=True, allow_floats=False)
 
     @classmethod
+    @iap._prefetchable_str
     def _handle_mode_arg(cls, mode):
         if mode == ia.ALL:
             return iap.Choice(["constant", "nearest", "reflect", "wrap"])

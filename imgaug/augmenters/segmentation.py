@@ -1250,7 +1250,7 @@ class RegularGridPointsSampler(IPointsSampler):
             tuple_to_uniform=True, list_to_choice=True, allow_floats=False)
 
     def sample_points(self, images, random_state):
-        random_state = iarandom.RNG(random_state)
+        random_state = iarandom.RNG.create_if_not_rng_(random_state)
         _verify_sample_points_images(images)
 
         n_rows_lst, n_cols_lst = self._draw_samples(images, random_state)
@@ -1384,7 +1384,7 @@ class RelativeRegularGridPointsSampler(IPointsSampler):
 
     def sample_points(self, images, random_state):
         # pylint: disable=protected-access
-        random_state = iarandom.RNG(random_state)
+        random_state = iarandom.RNG.create_if_not_rng_(random_state)
         _verify_sample_points_images(images)
 
         n_rows, n_cols = self._draw_samples(images, random_state)
@@ -1495,7 +1495,7 @@ class DropoutPointsSampler(IPointsSampler):
         return p_drop
 
     def sample_points(self, images, random_state):
-        random_state = iarandom.RNG(random_state)
+        random_state = iarandom.RNG.create_if_not_rng_(random_state)
         _verify_sample_points_images(images)
 
         rss = random_state.duplicate(2)
@@ -1582,7 +1582,7 @@ class UniformPointsSampler(IPointsSampler):
             tuple_to_uniform=True, list_to_choice=True, allow_floats=False)
 
     def sample_points(self, images, random_state):
-        random_state = iarandom.RNG(random_state)
+        random_state = iarandom.RNG.create_if_not_rng_(random_state)
         _verify_sample_points_images(images)
 
         rss = random_state.duplicate(2)
@@ -1673,7 +1673,7 @@ class SubsamplingPointsSampler(IPointsSampler):
                     "returned.")
 
     def sample_points(self, images, random_state):
-        random_state = iarandom.RNG(random_state)
+        random_state = iarandom.RNG.create_if_not_rng_(random_state)
         _verify_sample_points_images(images)
 
         rss = random_state.duplicate(len(images) + 1)

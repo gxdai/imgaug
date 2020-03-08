@@ -27,6 +27,7 @@ except ImportError:
 
 import imgaug as ia
 import imgaug.random as iarandom
+import imgaug.parameters as iap
 from imgaug.augmentables.kps import KeypointsOnImage
 
 
@@ -360,3 +361,54 @@ def assertWarns(testcase, expected_warning, *args, **kwargs):
     # pylint: disable=invalid-name
     context = _AssertWarnsContext(expected_warning, testcase)
     return context.handle("assertWarns", args, kwargs)
+
+
+def is_parameter_instance(param, param_type):
+    """Perform an isinstance check on a parameter while ignoring prefetching.
+
+    This is identical to ``isinstance(param, param_type)``, unless `param`
+    is an instance of :class:`imgaug.parameters.AutoPrefetcher`, then it
+    is equivalent to ``isinstance(param.other_param, param_type)`` (potentially
+    recursively evaluated until `param` is no longer prefetched).
+
+    Added in 0.5.0.
+
+    Parameters
+    ----------
+    param : imgaug.parameters.StochasticParameter
+        The parameter to check.
+
+    param_type : type
+        The desired type. Similar as in ``isinstance``.
+        E.g. ``imgaug.parameters.Deterministic``.
+
+    Returns
+    -------
+    bool
+        Whether the parameter is of the given type.
+
+    """
+    return isinstance(remove_prefetching(param), param_type)
+
+
+def remove_prefetching(param):
+    """Convert a possibly-prefetched parameter into a not-prefetched one.
+
+    Added in 0.5.0.
+
+    Parameters
+    ----------
+    param : imgaug.parameters.StochasticParameter
+        Parameter to remove prefetching from.
+
+    Returns
+    -------
+    imgaug.parameters.StochasticParameter
+        The input parameter without prefetching. (Not copied.)
+        If the input parameter was not prefetched, it will be returned without
+        change.
+
+    """
+    if isinstance(param, iap.AutoPrefetcher):
+        return remove_prefetching(param.other_param)
+    return param

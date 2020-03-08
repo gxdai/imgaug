@@ -2416,7 +2416,7 @@ class StochasticParameterMaskGen(IBatchwiseMaskGenerator):
 
         """
         shapes = batch.get_rowwise_shapes()
-        random_state = iarandom.RNG(random_state)
+        random_state = iarandom.RNG.create_if_not_rng_(random_state)
         per_channel = self.per_channel.draw_samples((len(shapes),),
                                                     random_state=random_state)
 
@@ -2586,7 +2586,7 @@ class SomeColorsMaskGen(IBatchwiseMaskGenerator):
         assert batch.images is not None, (
             "Can only generate masks for batches that contain images, but "
             "got a batch without images.")
-        random_state = iarandom.RNG(random_state)
+        random_state = iarandom.RNG.create_if_not_rng_(random_state)
         samples = self._draw_samples(batch, random_state=random_state)
 
         return [self._draw_mask(image, i, samples)
@@ -2770,7 +2770,7 @@ class _LinearGradientMaskGen(IBatchwiseMaskGenerator):
         Added in 0.4.0.
 
         """
-        random_state = iarandom.RNG(random_state)
+        random_state = iarandom.RNG.create_if_not_rng_(random_state)
         shapes = batch.get_rowwise_shapes()
         samples = self._draw_samples(len(shapes), random_state=random_state)
 
@@ -3150,7 +3150,7 @@ class RegularGridMaskGen(IBatchwiseMaskGenerator):
         Added in 0.4.0.
 
         """
-        random_state = iarandom.RNG(random_state)
+        random_state = iarandom.RNG.create_if_not_rng_(random_state)
         shapes = batch.get_rowwise_shapes()
         nb_rows, nb_cols, alpha = self._draw_samples(len(shapes),
                                                      random_state=random_state)
@@ -3312,7 +3312,7 @@ class CheckerboardMaskGen(IBatchwiseMaskGenerator):
 
         """
         # pylint: disable=protected-access
-        random_state = iarandom.RNG(random_state)
+        random_state = iarandom.RNG.create_if_not_rng_(random_state)
         shapes = batch.get_rowwise_shapes()
         nb_rows, nb_cols, _alpha = self.grid._draw_samples(
             len(shapes), random_state=random_state)
@@ -3462,7 +3462,7 @@ class SegMapClassIdsMaskGen(IBatchwiseMaskGenerator):
         assert batch.segmentation_maps is not None, (
             "Can only generate masks for batches that contain segmentation "
             "maps, but got a batch without them.")
-        random_state = iarandom.RNG(random_state)
+        random_state = iarandom.RNG.create_if_not_rng_(random_state)
         class_ids = self._draw_samples(batch.nb_rows,
                                        random_state=random_state)
 
@@ -3626,7 +3626,7 @@ class BoundingBoxesMaskGen(IBatchwiseMaskGenerator):
         assert batch.bounding_boxes is not None, (
             "Can only generate masks for batches that contain bounding boxes, "
             "but got a batch without them.")
-        random_state = iarandom.RNG(random_state)
+        random_state = iarandom.RNG.create_if_not_rng_(random_state)
 
         if self.labels is None:
             return [self.generate_mask(bbsoi, None)
@@ -3731,7 +3731,7 @@ class InvertMaskGen(IBatchwiseMaskGenerator):
         Added in 0.4.0.
 
         """
-        random_state = iarandom.RNG(random_state)
+        random_state = iarandom.RNG.create_if_not_rng_(random_state)
         masks = self.child.draw_masks(batch, random_state=random_state)
         p = self.p.draw_samples(len(masks), random_state=random_state)
         for mask, p_i in zip(masks, p):

@@ -20,7 +20,8 @@ from imgaug import augmenters as iaa
 from imgaug import parameters as iap
 from imgaug import dtypes as iadt
 from imgaug import random as iarandom
-from imgaug.testutils import reseed, runtest_pickleable_uint8_img
+from imgaug.testutils import (reseed, runtest_pickleable_uint8_img,
+                              is_parameter_instance)
 
 
 class TestSuperpixels(unittest.TestCase):
@@ -184,9 +185,9 @@ class TestSuperpixels(unittest.TestCase):
         aug = iaa.Superpixels(
             p_replace=0.5, n_segments=2, max_size=100, interpolation="nearest")
         params = aug.get_parameters()
-        assert isinstance(params[0], iap.Binomial)
-        assert isinstance(params[0].p, iap.Deterministic)
-        assert isinstance(params[1], iap.Deterministic)
+        assert params[0] is aug.p_replace
+        assert is_parameter_instance(params[0].p, iap.Deterministic)
+        assert params[1] is aug.n_segments
         assert 0.5 - 1e-4 < params[0].p.value < 0.5 + 1e-4
         assert params[1].value == 2
         assert params[2] == 100
@@ -480,7 +481,7 @@ class TestVoronoi(unittest.TestCase):
         sampler = iaa.RegularGridPointsSampler(1, 1)
         aug = iaa.Voronoi(sampler)
         assert aug.points_sampler is sampler
-        assert isinstance(aug.p_replace, iap.Deterministic)
+        assert is_parameter_instance(aug.p_replace, iap.Deterministic)
         assert aug.p_replace.value == 1
         assert aug.max_size == 128
         assert aug.interpolation == "linear"
@@ -490,7 +491,7 @@ class TestVoronoi(unittest.TestCase):
         aug = iaa.Voronoi(sampler, p_replace=0.5, max_size=None,
                           interpolation="cubic")
         assert aug.points_sampler is sampler
-        assert isinstance(aug.p_replace, iap.Binomial)
+        assert is_parameter_instance(aug.p_replace, iap.Binomial)
         assert np.isclose(aug.p_replace.p.value, 0.5)
         assert aug.max_size is None
         assert aug.interpolation == "cubic"
@@ -746,7 +747,7 @@ class TestVoronoi(unittest.TestCase):
                           interpolation="cubic")
         params = aug.get_parameters()
         assert params[0] is sampler
-        assert isinstance(params[1], iap.Binomial)
+        assert is_parameter_instance(params[1], iap.Binomial)
         assert np.isclose(params[1].p.value, 0.5)
         assert params[2] is None
         assert params[3] == "cubic"
@@ -865,8 +866,10 @@ class TestRegularGridVoronoi(unittest.TestCase):
             name=None
         )
         assert aug.points_sampler.other_points_sampler.n_rows.value == 10
-        assert isinstance(aug.points_sampler.other_points_sampler.n_cols,
-                          iap.DiscreteUniform)
+        assert is_parameter_instance(
+            aug.points_sampler.other_points_sampler.n_cols,
+            iap.DiscreteUniform
+        )
         assert aug.points_sampler.other_points_sampler.n_cols.a.value == 10
         assert aug.points_sampler.other_points_sampler.n_cols.b.value == 30
         assert np.isclose(aug.p_replace.p.value, 0.5)
@@ -929,7 +932,8 @@ class TestRelativeRegularGridVoronoi(unittest.TestCase):
 
         ps = aug.points_sampler
         assert np.isclose(ps.other_points_sampler.n_rows_frac.value, 0.1)
-        assert isinstance(ps.other_points_sampler.n_cols_frac, iap.Uniform)
+        assert is_parameter_instance(ps.other_points_sampler.n_cols_frac,
+                                     iap.Uniform)
         assert np.isclose(ps.other_points_sampler.n_cols_frac.a.value, 0.1)
         assert np.isclose(ps.other_points_sampler.n_cols_frac.b.value, 0.3)
         assert np.isclose(aug.p_replace.p.value, 0.5)
@@ -951,7 +955,7 @@ class TestRegularGridPointsSampler(unittest.TestCase):
 
     def test___init___(self):
         sampler = iaa.RegularGridPointsSampler((1, 10), 20)
-        assert isinstance(sampler.n_rows, iap.DiscreteUniform)
+        assert is_parameter_instance(sampler.n_rows, iap.DiscreteUniform)
         assert sampler.n_rows.a.value == 1
         assert sampler.n_rows.b.value == 10
         assert sampler.n_cols.value == 20
@@ -1087,9 +1091,12 @@ class TestRegularGridPointsSampler(unittest.TestCase):
         sampler = iaa.RegularGridPointsSampler(10, (10, 30))
         expected = (
             "RegularGridPointsSampler("
-            "Deterministic(int 10), "
-            "DiscreteUniform(Deterministic(int 10), Deterministic(int 30))"
-            ")"
+            "%s, "
+            "%s"
+            ")" % (
+                str(sampler.n_rows),
+                str(sampler.n_cols)
+            )
         )
         assert sampler.__str__() == sampler.__repr__() == expected
 
@@ -1100,7 +1107,7 @@ class TestRelativeRegularGridPointsSampler(unittest.TestCase):
 
     def test___init___(self):
         sampler = iaa.RelativeRegularGridPointsSampler((0.1, 0.2), 0.1)
-        assert isinstance(sampler.n_rows_frac, iap.Uniform)
+        assert is_parameter_instance(sampler.n_rows_frac, iap.Uniform)
         assert np.isclose(sampler.n_rows_frac.a.value, 0.1)
         assert np.isclose(sampler.n_rows_frac.b.value, 0.2)
         assert np.isclose(sampler.n_cols_frac.value, 0.1)
@@ -1215,12 +1222,12 @@ class TestRelativeRegularGridPointsSampler(unittest.TestCase):
         sampler = iaa.RelativeRegularGridPointsSampler(0.01, (0.01, 0.05))
         expected = (
             "RelativeRegularGridPointsSampler("
-            "Deterministic(float 0.01000000), "
-            "Uniform("
-            "Deterministic(float 0.01000000), "
-            "Deterministic(float 0.05000000)"
-            ")"
-            ")"
+            "%s, "
+            "%s"
+            ")" % (
+                str(sampler.n_rows_frac),
+                str(sampler.n_cols_frac)
+            )
         )
         assert sampler.__str__() == sampler.__repr__() == expected
 
@@ -1322,11 +1329,15 @@ class TestDropoutPointsSampler(unittest.TestCase):
         expected = (
             "DropoutPointsSampler("
             "RegularGridPointsSampler("
-            "Deterministic(int 10), "
-            "Deterministic(int 20)"
+            "%s, "
+            "%s"
             "), "
-            "Binomial(Deterministic(float 0.80000000))"
-            ")"
+            "%s"
+            ")" % (
+                str(sampler.other_points_sampler.n_rows),
+                str(sampler.other_points_sampler.n_cols),
+                str(sampler.p_drop)
+            )
         )
         assert sampler.__str__() == sampler.__repr__() == expected
 
@@ -1337,7 +1348,7 @@ class TestUniformPointsSampler(unittest.TestCase):
 
     def test___init__(self):
         sampler = iaa.UniformPointsSampler(100)
-        assert isinstance(sampler.n_points, iap.Deterministic)
+        assert is_parameter_instance(sampler.n_points, iap.Deterministic)
         assert sampler.n_points.value == 100
 
     def test_sampled_points_not_identical(self):
@@ -1512,7 +1523,9 @@ class TestUniformPointsSampler(unittest.TestCase):
 
     def test_conversion_to_string(self):
         sampler = iaa.UniformPointsSampler(10)
-        expected = "UniformPointsSampler(Deterministic(int 10))"
+        expected = "UniformPointsSampler(%s)" % (
+            str(sampler.n_points)
+        )
         assert sampler.__str__() == sampler.__repr__() == expected
 
 
@@ -1601,10 +1614,13 @@ class TestSubsamplingPointsSampler(unittest.TestCase):
         expected = (
             "SubsamplingPointsSampler("
             "RegularGridPointsSampler("
-            "Deterministic(int 10), "
-            "Deterministic(int 20)"
+            "%s, "
+            "%s"
             "), "
             "10"
-            ")"
+            ")" % (
+                str(sampler.other_points_sampler.n_rows),
+                str(sampler.other_points_sampler.n_cols)
+            )
         )
         assert sampler.__str__() == sampler.__repr__() == expected
