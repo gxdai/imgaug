@@ -150,121 +150,275 @@ def blur_gaussian_(image, sigma, ksize=None, backend="auto", eps=1e-3):
         (Input image *might* have been altered in-place.)
 
     """
-    has_zero_sized_axes = (image.size == 0)
-    if sigma > 0 + eps and not has_zero_sized_axes:
-        dtype = image.dtype
+    if image.size == 0:
+        return image
 
-        iadt.gate_dtypes(image,
-                         allowed=["bool",
-                                  "uint8", "uint16", "uint32",
-                                  "int8", "int16", "int32", "int64", "uint64",
-                                  "float16", "float32", "float64"],
-                         disallowed=["uint128", "uint256",
-                                     "int128", "int256",
-                                     "float96", "float128", "float256"],
-                         augmenter=None)
+    if sigma < eps:
+        return image
 
-        dts_not_supported_by_cv2 = ["uint32", "uint64", "int64", "float128"]
-        backend_to_use = backend
-        if backend == "auto":
-            backend_to_use = (
-                "cv2"
-                if image.dtype.name not in dts_not_supported_by_cv2
-                else "scipy")
-        elif backend == "cv2":
-            assert image.dtype.name not in dts_not_supported_by_cv2, (
-                "Requested 'cv2' backend, but provided %s input image, which "
-                "cannot be handled by that backend. Choose a different "
-                "backend or set backend to 'auto' or use a different "
-                "datatype." % (
-                    image.dtype.name,))
-        elif backend == "scipy":
-            # can handle all dtypes that were allowed in gate_dtypes()
-            pass
+    iadt.gate_dtypes_strs(
+        {image.dtype},
+        allowed="bool uint8 uint16 uint32 "
+                "int8 int16 int32 int64 "
+                "uint64 "
+                "float16 float32 float64",
+        disallowed="float128",
+        augmenter=None
+    )
 
-        if backend_to_use == "scipy":
-            if dtype.name == "bool":
-                # We convert bool to float32 here, because gaussian_filter()
-                # seems to only return True when the underlying value is
-                # approximately 1.0, not when it is above 0.5. So we do that
-                # here manually. cv2 does not support bool for gaussian blur.
-                image = image.astype(np.float32, copy=False)
-            elif dtype.name == "float16":
-                image = image.astype(np.float32, copy=False)
+    dts_not_supported_by_cv2 = iadt._convert_dtype_strs_to_types(
+        "uint32 uint64 int64 float128"
+    )
+    backend_to_use = backend
+    if backend == "auto":
+        backend_to_use = (
+            "cv2"
+            if image.dtype not in dts_not_supported_by_cv2
+            else "scipy")
+    elif backend == "cv2":
+        assert image.dtype not in dts_not_supported_by_cv2, (
+            "Requested 'cv2' backend, but provided %s input image, which "
+            "cannot be handled by that backend. Choose a different "
+            "backend or set backend to 'auto' or use a different "
+            "datatype." % (
+                image.dtype.name,))
+    elif backend == "scipy":
+        # can handle all dtypes that were allowed in gate_dtypes()
+        pass
 
-            # gaussian_filter() has no ksize argument
-            # TODO it does have a truncate argument that truncates at x
-            #      standard deviations -- maybe can be used similarly to ksize
-            if ksize is not None:
-                ia.warn(
-                    "Requested 'scipy' backend or picked it automatically by "
-                    "backend='auto' n blur_gaussian_(), but also provided "
-                    "'ksize' argument, which is not understood by that "
-                    "backend and will be ignored.")
-
-            # Note that while gaussian_filter can be applied to all channels
-            # at the same time, that should not be done here, because then
-            # the blurring would also happen across channels (e.g. red values
-            # might be mixed with blue values in RGB)
-            if image.ndim == 2:
-                image[:, :] = ndimage.gaussian_filter(image[:, :], sigma,
-                                                      mode="mirror")
-            else:
-                nb_channels = image.shape[2]
-                for channel in sm.xrange(nb_channels):
-                    image[:, :, channel] = ndimage.gaussian_filter(
-                        image[:, :, channel], sigma, mode="mirror")
-        else:
-            if dtype.name == "bool":
-                image = image.astype(np.float32, copy=False)
-            elif dtype.name == "float16":
-                image = image.astype(np.float32, copy=False)
-            elif dtype.name == "int8":
-                image = image.astype(np.int16, copy=False)
-            elif dtype.name == "int32":
-                image = image.astype(np.float64, copy=False)
-
-            # ksize here is derived from the equation to compute sigma based
-            # on ksize, see
-            # https://docs.opencv.org/3.1.0/d4/d86/group__imgproc__filter.html
-            # -> cv::getGaussianKernel()
-            # example values:
-            #   sig = 0.1 -> ksize = -1.666
-            #   sig = 0.5 -> ksize = 0.9999
-            #   sig = 1.0 -> ksize = 1.0
-            #   sig = 2.0 -> ksize = 11.0
-            #   sig = 3.0 -> ksize = 17.666
-            # ksize = ((sig - 0.8)/0.3 + 1)/0.5 + 1
-
-            if ksize is None:
-                ksize = _compute_gaussian_blur_ksize(sigma)
-            else:
-                assert ia.is_single_integer(ksize), (
-                    "Expected 'ksize' argument to be a number, "
-                    "got %s." % (type(ksize),))
-
-            ksize = ksize + 1 if ksize % 2 == 0 else ksize
-
-            if ksize > 0:
-                image_warped = cv2.GaussianBlur(
-                    _normalize_cv2_input_arr_(image),
-                    (ksize, ksize),
-                    sigmaX=sigma,
-                    sigmaY=sigma,
-                    borderType=cv2.BORDER_REFLECT_101)
-
-                # re-add channel axis removed by cv2 if input was (H, W, 1)
-                image = (
-                    image_warped[..., np.newaxis]
-                    if image.ndim == 3 and image_warped.ndim == 2
-                    else image_warped)
-
-        if dtype.name == "bool":
-            image = image > 0.5
-        elif dtype.name != image.dtype.name:
-            image = iadt.restore_dtypes_(image, dtype)
+    if backend_to_use == "scipy":
+        image = _blur_gaussian_scipy_(image, sigma, ksize)
+    else:
+        image = _blur_gaussian_cv2(image, sigma, ksize)
 
     return image
+
+
+# Added in 0.5.0.
+def _blur_gaussian_scipy_(image, sigma, ksize):
+    dtype = image.dtype
+
+    if dtype.kind == "b":
+        # We convert bool to float32 here, because gaussian_filter()
+        # seems to only return True when the underlying value is
+        # approximately 1.0, not when it is above 0.5. So we do that
+        # here manually. cv2 does not support bool for gaussian blur.
+        image = image.astype(np.float32, copy=False)
+    elif dtype == iadt._FLOAT16_DTYPE:
+        image = image.astype(np.float32, copy=False)
+
+    # gaussian_filter() has no ksize argument
+    # TODO it does have a truncate argument that truncates at x
+    #      standard deviations -- maybe can be used similarly to ksize
+    if ksize is not None:
+        ia.warn(
+            "Requested 'scipy' backend or picked it automatically by "
+            "backend='auto' n blur_gaussian_(), but also provided "
+            "'ksize' argument, which is not understood by that "
+            "backend and will be ignored.")
+
+    # Note that while gaussian_filter can be applied to all channels
+    # at the same time, that should not be done here, because then
+    # the blurring would also happen across channels (e.g. red values
+    # might be mixed with blue values in RGB)
+    if image.ndim == 2:
+        image[:, :] = ndimage.gaussian_filter(image[:, :], sigma,
+                                              mode="mirror")
+    else:
+        nb_channels = image.shape[2]
+        for channel in sm.xrange(nb_channels):
+            image[:, :, channel] = ndimage.gaussian_filter(
+                image[:, :, channel], sigma, mode="mirror")
+
+    if dtype.kind == "b":
+        image = image > 0.5
+    elif dtype != image.dtype:
+        image = iadt.restore_dtypes_(image, dtype)
+
+    return image
+
+
+# Added in 0.5.0.
+def _blur_gaussian_cv2(image, sigma, ksize):
+    dtype = image.dtype
+
+    if dtype.kind == "b":
+        image = image.astype(np.float32, copy=False)
+    elif dtype == iadt._FLOAT16_DTYPE:
+        image = image.astype(np.float32, copy=False)
+    elif dtype == iadt._INT8_DTYPE:
+        image = image.astype(np.int16, copy=False)
+    elif dtype == iadt._INT32_DTYPE:
+        image = image.astype(np.float64, copy=False)
+
+    # ksize here is derived from the equation to compute sigma based
+    # on ksize, see
+    # https://docs.opencv.org/3.1.0/d4/d86/group__imgproc__filter.html
+    # -> cv::getGaussianKernel()
+    # example values:
+    #   sig = 0.1 -> ksize = -1.666
+    #   sig = 0.5 -> ksize = 0.9999
+    #   sig = 1.0 -> ksize = 1.0
+    #   sig = 2.0 -> ksize = 11.0
+    #   sig = 3.0 -> ksize = 17.666
+    # ksize = ((sig - 0.8)/0.3 + 1)/0.5 + 1
+
+    if ksize is None:
+        ksize = _compute_gaussian_blur_ksize(sigma)
+    else:
+        assert ia.is_single_integer(ksize), (
+            "Expected 'ksize' argument to be a number, "
+            "got %s." % (type(ksize),))
+        ksize = ksize + 1 if ksize % 2 == 0 else ksize
+
+    image_warped = image
+    if ksize > 0:
+        # works with >512 channels
+        # normalization not required here
+        # dst seems to not help here
+        image_warped = cv2.GaussianBlur(
+            image,
+            (ksize, ksize),
+            sigmaX=sigma,
+            sigmaY=sigma,
+            borderType=cv2.BORDER_REFLECT_101
+        )
+
+        if image_warped.ndim == 2 and image.ndim == 3:
+            image_warped = image_warped[..., np.newaxis]
+
+    if dtype.kind == "b":
+        image_warped = image_warped > 0.5
+    elif dtype != image.dtype:
+        image_warped = iadt.restore_dtypes_(image_warped, dtype)
+
+    return image_warped
+
+
+def _compute_gaussian_blur_ksize(sigma):
+    if sigma < 3.0:
+        ksize = 3.3 * sigma  # 99% of weight
+    elif sigma < 5.0:
+        ksize = 2.9 * sigma  # 97% of weight
+    else:
+        ksize = 2.6 * sigma  # 95% of weight
+
+    # we use 5x5 here as the minimum size as that simplifies
+    # comparisons with gaussian_filter() in the tests
+    # TODO reduce this to 3x3
+    ksize = int(max(ksize, 5))
+    if ksize % 2 == 0:
+        ksize += 1
+    return ksize
+
+
+def blur_avg_(image, k):
+    """Blur an image in-place by computing averages over local neighbourhoods.
+
+    This operation *may* change the input image in-place.
+
+    The padding behaviour around the image borders is cv2's
+    ``BORDER_REFLECT_101``.
+
+    Added in 0.5.0.
+
+    **Supported dtypes**:
+
+        * ``uint8``: yes; fully tested
+        * ``uint16``: yes; tested
+        * ``uint32``: no (1)
+        * ``uint64``: no (2)
+        * ``int8``: yes; tested (3)
+        * ``int16``: yes; tested
+        * ``int32``: no (4)
+        * ``int64``: no (5)
+        * ``float16``: yes; tested (6)
+        * ``float32``: yes; tested
+        * ``float64``: yes; tested
+        * ``float128``: no
+        * ``bool``: yes; tested (7)
+
+        - (1) rejected by ``cv2.blur()``
+        - (2) loss of resolution in ``cv2.blur()`` (result is ``int32``)
+        - (3) ``int8`` is mapped internally to ``int16``, ``int8`` itself
+              leads to cv2 error "Unsupported combination of source format
+              (=1), and buffer format (=4) in function 'getRowSumFilter'" in
+              ``cv2``
+        - (4) results too inaccurate
+        - (5) loss of resolution in ``cv2.blur()`` (result is ``int32``)
+        - (6) ``float16`` is mapped internally to ``float32``
+        - (7) ``bool`` is mapped internally to ``float32``
+
+    Parameters
+    ----------
+    image : numpy.ndarray
+        The image to blur. Expected to be of shape ``(H, W)`` or ``(H, W, C)``.
+
+    k : int or tuple of int
+        Kernel size to use. A single ``int`` will lead to an ``k x k``
+        kernel. Otherwise a ``tuple`` of two ``int`` ``(height, width)``
+        is expected.
+
+    Returns
+    -------
+    numpy.ndarray
+        The blurred image. Same shape and dtype as the input.
+        (Input image *might* have been altered in-place.)
+
+    """
+    if isinstance(k, tuple):
+        k_height, k_width = k
+    else:
+        k_height, k_width = k, k
+
+    shape = image.shape
+    if 0 in shape:
+        return image
+
+    if k_height <= 0 or k_width <= 0 or (k_height, k_width) == (1, 1):
+        return image
+
+    iadt.gate_dtypes_strs(
+        {image.dtype},
+        allowed="bool uint8 uint16 int8 int16 float16 float32 float64",
+        disallowed="uint32 uint64 int32 int64 float128"
+    )
+
+    input_dtype = image.dtype
+    if image.dtype in {iadt._BOOL_DTYPE, iadt._FLOAT16_DTYPE}:
+        image = image.astype(np.float32, copy=False)
+    elif image.dtype == iadt._INT8_DTYPE:
+        image = image.astype(np.int16, copy=False)
+
+    input_ndim = len(shape)
+    if input_ndim == 2 or shape[-1] <= 512:
+        image = _normalize_cv2_input_arr_(image)
+        image_aug = cv2.blur(
+            image,
+            (k_width, k_height),
+            dst=image
+        )
+        # cv2.blur() removes channel axis for single-channel images
+        if input_ndim == 3 and image_aug.ndim == 2:
+            image_aug = image_aug[..., np.newaxis]
+    else:
+        # TODO this is quite inefficient
+        # handling more than 512 channels in cv2.blur()
+        channels = [
+            cv2.blur(
+                _normalize_cv2_input_arr_(image[..., c]),
+                (k_width, k_height)
+            )
+            for c in sm.xrange(shape[-1])
+        ]
+        image_aug = np.stack(channels, axis=-1)
+
+    if input_dtype.kind == "b":
+        image_aug = image_aug > 0.5
+    elif input_dtype in {iadt._INT8_DTYPE, iadt._FLOAT16_DTYPE}:
+        image_aug = iadt.restore_dtypes_(image_aug, input_dtype)
+
+    return image_aug
 
 
 def blur_mean_shift_(image, spatial_window_radius, color_window_radius):
@@ -330,9 +484,7 @@ def blur_mean_shift_(image, spatial_window_radius, color_window_radius):
         return image
 
     # opencv method only supports uint8
-    assert image.dtype.name == "uint8", (
-        "Expected image with dtype \"uint8\", "
-        "got \"%s\"." % (image.dtype.name,))
+    iadt.allow_only_uint8({image.dtype})
 
     shape_is_hw = (image.ndim == 2)
     shape_is_hw1 = (image.ndim == 3 and image.shape[-1] == 1)
@@ -365,21 +517,6 @@ def blur_mean_shift_(image, spatial_window_radius, color_window_radius):
         image = image[..., 0:1]
 
     return image
-
-
-def _compute_gaussian_blur_ksize(sigma):
-    if sigma < 3.0:
-        ksize = 3.3 * sigma  # 99% of weight
-    elif sigma < 5.0:
-        ksize = 2.9 * sigma  # 97% of weight
-    else:
-        ksize = 2.6 * sigma  # 95% of weight
-
-    # we use 5x5 here as the minimum size as that simplifies
-    # comparisons with gaussian_filter() in the tests
-    # TODO reduce this to 3x3
-    ksize = int(max(ksize, 5))
-    return ksize
 
 
 # TODO offer different values for sigma on x/y-axis, supported by cv2 but not
@@ -617,22 +754,16 @@ class AverageBlur(meta.Augmenter):
                 "Expected int, tuple/list with 2 entries or "
                 "StochasticParameter. Got %s." % (type(k),))
 
+        self.k = iap._wrap_leafs_of_param_in_prefetchers(
+            self.k, iap._NB_PREFETCH
+        )
+
     # Added in 0.4.0.
     def _augment_batch_(self, batch, random_state, parents, hooks):
         if batch.images is None:
             return batch
 
         images = batch.images
-
-        iadt.gate_dtypes(
-            images,
-            allowed=["bool",
-                     "uint8", "uint16", "int8", "int16",
-                     "float16", "float32", "float64"],
-            disallowed=["uint32", "uint64", "uint128", "uint256",
-                        "int32", "int64", "int128", "int256",
-                        "float96", "float128", "float256"],
-            augmenter=self)
 
         nb_images = len(images)
         if self.mode == "single":
@@ -648,41 +779,7 @@ class AverageBlur(meta.Augmenter):
 
         gen = enumerate(zip(images, samples[0], samples[1]))
         for i, (image, ksize_h, ksize_w) in gen:
-            kernel_impossible = (ksize_h == 0 or ksize_w == 0)
-            kernel_does_nothing = (ksize_h == 1 and ksize_w == 1)
-            has_zero_sized_axes = (image.size == 0)
-            if (not kernel_impossible and not kernel_does_nothing
-                    and not has_zero_sized_axes):
-                input_dtype = image.dtype
-                if image.dtype.name in ["bool", "float16"]:
-                    image = image.astype(np.float32, copy=False)
-                elif image.dtype.name == "int8":
-                    image = image.astype(np.int16, copy=False)
-
-                if image.ndim == 2 or image.shape[-1] <= 512:
-                    image_aug = cv2.blur(
-                        _normalize_cv2_input_arr_(image),
-                        (ksize_h, ksize_w))
-                    # cv2.blur() removes channel axis for single-channel images
-                    if image_aug.ndim == 2:
-                        image_aug = image_aug[..., np.newaxis]
-                else:
-                    # TODO this is quite inefficient
-                    # handling more than 512 channels in cv2.blur()
-                    channels = [
-                        cv2.blur(
-                            _normalize_cv2_input_arr_(image[..., c]),
-                            (ksize_h, ksize_w))
-                        for c in sm.xrange(image.shape[-1])
-                    ]
-                    image_aug = np.stack(channels, axis=-1)
-
-                if input_dtype.name == "bool":
-                    image_aug = image_aug > 0.5
-                elif input_dtype.name in ["int8", "float16"]:
-                    image_aug = iadt.restore_dtypes_(image_aug, input_dtype)
-
-                batch.images[i] = image_aug
+            batch.images[i] = blur_avg_(image, (ksize_h, ksize_w))
         return batch
 
     def get_parameters(self):
@@ -781,6 +878,9 @@ class MedianBlur(meta.Augmenter):
             assert all([ki % 2 != 0 for ki in k]), (
                 "Expected all values in iterable k to be odd, but at least "
                 "one was not. Add or subtract 1 to/from that value.")
+        self.k = iap._wrap_leafs_of_param_in_prefetchers(
+            self.k, iap._NB_PREFETCH
+        )
 
     # Added in 0.4.0.
     def _augment_batch_(self, batch, random_state, parents, hooks):

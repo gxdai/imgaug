@@ -21,8 +21,10 @@ import imgaug.random as iarandom
 import imgaug.augmenters.pooling as iapooling
 from imgaug import augmenters as iaa
 from imgaug import parameters as iap
-from imgaug.testutils import (reseed, assert_cbaois_equal,
-                              runtest_pickleable_uint8_img)
+from imgaug.testutils import (reseed,
+                              assert_cbaois_equal,
+                              runtest_pickleable_uint8_img,
+                              is_parameter_instance)
 
 
 class Test_compute_shape_after_pooling(unittest.TestCase):
@@ -601,7 +603,7 @@ class _TestPoolingAugmentersBase(object):
         params = aug.get_parameters()
         assert len(params) == 2
         assert len(params[0]) == 2
-        assert isinstance(params[0][0], iap.Deterministic)
+        assert is_parameter_instance(params[0][0], iap.Deterministic)
         assert params[0][0].value == 2
         assert params[0][1] is None
 
@@ -622,7 +624,7 @@ class TestAveragePooling(unittest.TestCase, _TestPoolingAugmentersBase):
     def test___init___default_settings(self):
         aug = iaa.AveragePooling(2)
         assert len(aug.kernel_size) == 2
-        assert isinstance(aug.kernel_size[0], iap.Deterministic)
+        assert is_parameter_instance(aug.kernel_size[0], iap.Deterministic)
         assert aug.kernel_size[0].value == 2
         assert aug.kernel_size[1] is None
         assert aug.keep_size is True
@@ -630,8 +632,8 @@ class TestAveragePooling(unittest.TestCase, _TestPoolingAugmentersBase):
     def test___init___custom_settings(self):
         aug = iaa.AveragePooling(((2, 4), (5, 6)), keep_size=False)
         assert len(aug.kernel_size) == 2
-        assert isinstance(aug.kernel_size[0], iap.DiscreteUniform)
-        assert isinstance(aug.kernel_size[1], iap.DiscreteUniform)
+        assert is_parameter_instance(aug.kernel_size[0], iap.DiscreteUniform)
+        assert is_parameter_instance(aug.kernel_size[1], iap.DiscreteUniform)
         assert aug.kernel_size[0].a.value == 2
         assert aug.kernel_size[0].b.value == 4
         assert aug.kernel_size[1].a.value == 5
@@ -675,6 +677,52 @@ class TestAveragePooling(unittest.TestCase, _TestPoolingAugmentersBase):
         diff = np.abs(image_aug.astype(np.int32) - expected)
         assert image_aug.dtype.name == "uint8"
         assert image_aug.shape == (1, 2, 3)
+        assert np.all(diff <= 1)
+
+    def test_augment_images__kernel_size_is_two__view(self):
+        aug = iaa.AveragePooling(2, keep_size=False)
+
+        image = np.uint8([
+            [50-2, 50-1, 120-4, 120+4],
+            [50+1, 50+2, 120+1, 120-1],
+            [0, 0, 0, 0]
+        ])
+        image = np.tile(image[:, :, np.newaxis], (1, 1, 3))
+        image = image[:2, :, :]
+        assert not image.flags["OWNDATA"]
+        assert image.flags["C_CONTIGUOUS"]
+
+        expected = np.uint8([
+            [50, 120]
+        ])
+        expected = np.tile(expected[:, :, np.newaxis], (1, 1, 3))
+
+        image_aug = aug.augment_image(image)
+
+        diff = np.abs(image_aug.astype(np.int32) - expected)
+        assert image_aug.dtype.name == "uint8"
+        assert image_aug.shape == (1, 2, 3)
+        assert np.all(diff <= 1)
+
+    def test_augment_images__kernel_size_is_two__non_contiguous(self):
+        aug = iaa.AveragePooling(2, keep_size=False)
+
+        image = np.array([
+            [50-2, 50-1, 120-4, 120+4],
+            [50+1, 50+2, 120+1, 120-1]
+        ], dtype=np.uint8, order="F")
+        assert image.flags["OWNDATA"]
+        assert not image.flags["C_CONTIGUOUS"]
+
+        expected = np.uint8([
+            [50, 120]
+        ])
+
+        image_aug = aug.augment_image(image)
+
+        diff = np.abs(image_aug.astype(np.int32) - expected)
+        assert image_aug.dtype.name == "uint8"
+        assert image_aug.shape == (1, 2)
         assert np.all(diff <= 1)
 
     def test_augment_images__kernel_size_is_two__four_channels(self):

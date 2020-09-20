@@ -15,6 +15,7 @@ except ImportError:
     import mock
 
 import numpy as np
+import cv2
 import six.moves as sm
 
 import imgaug as ia
@@ -22,10 +23,455 @@ from imgaug import augmenters as iaa
 from imgaug import parameters as iap
 from imgaug import dtypes as iadt
 from imgaug import random as iarandom
-from imgaug.testutils import (array_equal_lists, keypoints_equal, reseed,
-                              runtest_pickleable_uint8_img, assertWarns)
+from imgaug.testutils import (
+    array_equal_lists,
+    keypoints_equal,
+    reseed,
+    runtest_pickleable_uint8_img,
+    assertWarns,
+    is_parameter_instance
+)
 import imgaug.augmenters.arithmetic as arithmetic_lib
 import imgaug.augmenters.contrast as contrast_lib
+from imgaug.augmenters.arithmetic import (
+    _add_elementwise_cv2_to_uint8,
+    _multiply_scalar_to_uint8_cv2_mul_,
+    _multiply_elementwise_to_uint8_,
+    _invert_uint8_subtract_
+)
+
+
+class Test__add_elementwise_cv2_to_uint8(unittest.TestCase):
+    def test_image_is_hw(self):
+        image_shape = (3, 4)
+        values_shape = (3, 4)
+
+        image = np.ones(image_shape, dtype=np.uint8)
+        values = np.ones(values_shape, dtype=np.float32)
+
+        result = _add_elementwise_cv2_to_uint8(image, values)
+
+        assert np.array_equal(result, image + 1)
+        assert result.shape == image_shape
+        assert result.dtype.name == "uint8"
+        assert result is not image
+
+    def test_image_is_hwn(self):
+        for nb_channels in [1, 2, 3, 4, 5, 10]:
+            for values_nb_channels in [None, 1, nb_channels]:
+                image_shape = (3, 4, nb_channels)
+                values_shape = (3, 4)
+                if values_nb_channels is not None:
+                    values_shape = values_shape + (values_nb_channels,)
+
+                with self.subTest(image_shape=image_shape,
+                                  values_shape=values_shape):
+                    image = np.ones(image_shape, dtype=np.uint8)
+                    values = np.ones(values_shape, dtype=np.float32)
+
+                    result = _add_elementwise_cv2_to_uint8(image, values)
+
+                    assert np.array_equal(result, image + 1)
+                    assert result.shape == image_shape
+                    assert result.dtype.name == "uint8"
+                    assert result is not image
+
+    def test_image_is_view(self):
+        for shape in [(4, 3), (4, 3, 3)]:
+            with self.subTest(shape=shape):
+                image = np.ones(shape, dtype=np.uint8)
+                values = np.ones((shape[0]-1, shape[1]), dtype=np.float32)
+
+                image = image[0:3, :]
+                assert image.flags["OWNDATA"] is False
+                assert image.flags["C_CONTIGUOUS"] is True
+
+                result = _add_elementwise_cv2_to_uint8(image, values)
+
+                assert np.array_equal(result, image + 1)
+                assert result.shape == (shape[0]-1, shape[1]) + shape[2:]
+                assert result.dtype.name == "uint8"
+                assert result is not image
+
+    def test_image_is_non_contiguous(self):
+        for shape in [(3, 4), (3, 4, 3)]:
+            with self.subTest(shape=shape):
+                image = np.ones(shape, dtype=np.uint8, order="F")
+                values = np.ones(shape, dtype=np.float32)
+
+                assert image.flags["OWNDATA"] is True
+                assert image.flags["C_CONTIGUOUS"] is False
+
+                result = _add_elementwise_cv2_to_uint8(image, values)
+
+                assert np.array_equal(result, image + 1)
+                assert result.shape == shape
+                assert result.dtype.name == "uint8"
+                assert result is not image
+
+    def test_floats_with_decimal_points(self):
+        image_shape = (3, 4, 3)
+        values_shape = (3, 4)
+
+        image = np.ones(image_shape, dtype=np.uint8)
+        values = np.full(values_shape, 1.7, dtype=np.float32)
+
+        result = _add_elementwise_cv2_to_uint8(image, values)
+        # cv2.add() performs rounding
+        assert np.array_equal(result, image + 2)
+        assert result.shape == image_shape
+        assert result.dtype.name == "uint8"
+        assert result is not image
+
+    def test_is_saturating(self):
+        image_shape = (3, 4, 3)
+        values_shape = (3, 4)
+
+        for value in [-1000.5, 1000.5]:
+            with self.subTest(value=value):
+                image = np.ones(image_shape, dtype=np.uint8)
+                values = np.full(values_shape, value, dtype=np.float32)
+
+                result = _add_elementwise_cv2_to_uint8(image, values)
+                if value < 0:
+                    assert np.all(result == 0)
+                else:
+                    assert np.all(result == 255)
+                assert result.shape == image_shape
+                assert result.dtype.name == "uint8"
+                assert result is not image
+
+    def test_values_is_int_uint(self):
+        image_shape = (3, 4, 3)
+        values_shape = (3, 4)
+
+        dtypes = ["int8", "int16", "int32", "uint8", "uint16"]
+        values = ["min", -10, -1, 0, 1, 10, "max"]
+
+        for dt in dtypes:
+            for value in values:
+                vmin, _, vmax = iadt.get_value_range_of_dtype(dt)
+                if value == "min":
+                    value = max(vmin, -1000)
+                elif value == "max":
+                    value = min(1000, vmax)
+                elif value < 0:
+                    value = 0 if dt.startswith("uint") else value
+
+                with self.subTest(dtype=dt, value=value):
+                    image = np.full(image_shape, 127, dtype=np.uint8)
+                    values_arr = np.full(values_shape, value, dtype=dt)
+
+                    result = _add_elementwise_cv2_to_uint8(image, values_arr)
+
+                    expected_value = min(max(127 + value, 0), 255)
+                    assert np.all(result == expected_value)
+                    assert result.shape == image_shape
+                    assert result.dtype.name == "uint8"
+                    assert result is not image
+
+    def test_values_is_float(self):
+        image_shape = (3, 4, 3)
+        values_shape = (3, 4)
+
+        dtypes = ["float32", "float64"]
+        values = [
+            [-1000.0, -255.0, -1.0, 0.0, 1.0, 255.0, 1000.0],
+            [-1000.0, -255.0, -1.0, 0.0, 1.0, 255.0, 1000.0]
+        ]
+
+        for dt, values_dt in zip(dtypes, values):
+            for value in values_dt:
+                with self.subTest(dtype=dt, value=value):
+                    image = np.full(image_shape, 127, dtype=np.uint8)
+                    values = np.full(values_shape, value, dtype=dt)
+
+                    result = _add_elementwise_cv2_to_uint8(image, values)
+
+                    if value < -1.01:
+                        expected_value = 0
+                    elif np.isclose(value, -1.0):
+                        expected_value = 126
+                    elif np.isclose(value, 0.0):
+                        expected_value = 127
+                    elif np.isclose(value, 1.0):
+                        expected_value = 128
+                    else:
+                        expected_value = 255
+
+                    assert np.all(result == expected_value)
+                    assert result.shape == image_shape
+                    assert result.dtype.name == "uint8"
+                    assert result is not image
+
+
+class Test__multiply_scalar_to_uint8_cv2_mul_(unittest.TestCase):
+    def test_single_multiplier_image_hw(self):
+        image = np.full((3, 4), 10, dtype=np.uint8)
+        image_cp = np.copy(image)
+        multiplier = np.float32(2.67)
+
+        observed = _multiply_scalar_to_uint8_cv2_mul_(image_cp, multiplier)
+
+        expected = np.full((3, 4), 27, dtype=np.uint8)
+        assert np.array_equal(observed, expected)
+        assert observed.shape == image.shape
+        assert observed.dtype.name == "uint8"
+        assert observed is image_cp
+
+    def test_single_multiplier_image_hwc(self):
+        for nb_channels in [1, 2, 3, 4, 5, 10, 512, 513]:
+            with self.subTest(nb_channels=nb_channels):
+                image = np.full((3, 4, nb_channels), 10, dtype=np.uint8)
+                image_cp = np.copy(image)
+                multiplier = np.float32(2.6)
+
+                observed = _multiply_scalar_to_uint8_cv2_mul_(image_cp,
+                                                              multiplier)
+
+                expected = np.full((3, 4, nb_channels), 26, dtype=np.uint8)
+                assert np.array_equal(observed, expected)
+                assert observed.shape == image.shape
+                assert observed.dtype.name == "uint8"
+                assert observed is image_cp
+
+    def test_single_multiplier_saturating(self):
+        for value in [-0.1, 0, 30, 100.5]:
+            with self.subTest(value=value):
+                image = np.full((3, 4), 10, dtype=np.uint8)
+                image_cp = np.copy(image)
+                multiplier = np.float32(value)
+
+                observed = _multiply_scalar_to_uint8_cv2_mul_(image_cp,
+                                                              multiplier)
+
+                if value <= 0+1e-4:
+                    expected = np.zeros_like(image)
+                else:
+                    expected = np.full(image.shape, 255, dtype=np.uint8)
+                assert np.array_equal(observed, expected)
+                assert observed.shape == image.shape
+                assert observed.dtype.name == "uint8"
+                assert observed is image_cp
+
+    def test_channelwise_multiplier_image_hw(self):
+        image = np.full((3, 4), 10, dtype=np.uint8)
+        image_cp = np.copy(image)
+        multiplier = np.array([2.6], dtype=np.float32)
+
+        observed = _multiply_scalar_to_uint8_cv2_mul_(image_cp, multiplier)
+
+        expected = np.full((3, 4), 26, dtype=np.uint8)
+        assert np.array_equal(observed, expected)
+        assert observed.shape == image.shape
+        assert observed.dtype.name == "uint8"
+        assert observed is image_cp
+
+    def test_channelwise_multiplier_image_hwc(self):
+        for nb_channels in [1, 2, 3, 4, 5, 10, 512, 513]:
+            with self.subTest(nb_channels=nb_channels):
+                image = np.full((3, 4, nb_channels), 10, dtype=np.uint8)
+                image_cp = np.copy(image)
+                multiplier = np.ones((nb_channels,), dtype=np.float32)
+                multiplier[0] = 2.6
+                if nb_channels >= 2:
+                    multiplier[1] = 4.0
+                if nb_channels >= 3:
+                    multiplier[2] = 5.6
+                if nb_channels >= 4:
+                    multiplier[nb_channels-1] = 7.1
+
+                observed = _multiply_scalar_to_uint8_cv2_mul_(image_cp,
+                                                              multiplier)
+
+                expected = image
+                expected[:, :, 0] = 26
+                if nb_channels >= 2:
+                    expected[:, :, 1] = 40
+                if nb_channels >= 3:
+                    expected[:, :, 2] = 56
+                if nb_channels >= 4:
+                    expected[:, :, nb_channels-1] = 71
+                assert np.array_equal(observed, expected)
+                assert observed.shape == image.shape
+                assert observed.dtype.name == "uint8"
+                assert observed is image_cp
+
+    def test_image_is_view(self):
+        image = np.full((4, 3), 10, dtype=np.uint8)
+        image_cp = np.copy(image)[0:3, :]
+        multiplier = np.float32(2.6)
+
+        observed = _multiply_scalar_to_uint8_cv2_mul_(image_cp, multiplier)
+
+        expected = np.full((3, 3), 26, dtype=np.uint8)
+        assert np.array_equal(observed, expected)
+        assert observed.shape == (3, 3)
+        assert observed.dtype.name == "uint8"
+
+    def test_image_is_non_contiguous(self):
+        image = np.full((3, 4), 10, dtype=np.uint8)
+        image_cp = np.full((3, 4), 10, dtype=np.uint8, order="F")
+        multiplier = np.float32(2.6)
+
+        observed = _multiply_scalar_to_uint8_cv2_mul_(image_cp, multiplier)
+
+        expected = np.full((3, 4), 26, dtype=np.uint8)
+        assert np.array_equal(observed, expected)
+        assert observed.shape == image.shape
+        assert observed.dtype.name == "uint8"
+
+
+class Test_multiply_elementwise_to_non_uint8(unittest.TestCase):
+    def test_image_is_hw(self):
+        image = np.full((4, 3), 10, dtype=np.uint8)
+        image_cp = np.copy(image)
+        multipliers = np.full((4, 3), 2.7, dtype=np.float32)
+
+        observed = _multiply_elementwise_to_uint8_(image_cp, multipliers)
+
+        expected = np.full((4, 3), 27, dtype=np.uint8)
+        assert np.array_equal(observed, expected)
+        assert observed.shape == (4, 3)
+        assert observed.dtype.name == "uint8"
+        assert observed is image_cp
+
+    def test_image_is_hwn(self):
+        for nb_channels in [1, 2, 3, 4, 5, 10, 512, 513]:
+            with self.subTest(nb_channels=nb_channels):
+                image = np.full((4, 3, nb_channels), 10, dtype=np.uint8)
+                image_cp = np.copy(image)
+                multipliers = np.full((4, 3, nb_channels), 1, dtype=np.float32)
+                multipliers[:, :, 0] = 2.7
+                if nb_channels >= 2:
+                    multipliers[:, :, 1] = 4.0
+                if nb_channels >= 3:
+                    multipliers[:, :, 2] = 6.4
+                if nb_channels >= 4:
+                    multipliers[:, :, -1] = 8.3
+
+                observed = _multiply_elementwise_to_uint8_(image_cp,
+                                                           multipliers)
+
+                expected = np.full((4, 3, nb_channels), 10, dtype=np.uint8)
+                expected[:, :, 0] = 27
+                if nb_channels >= 2:
+                    expected[:, :, 1] = 40
+                if nb_channels >= 3:
+                    expected[:, :, 2] = 64
+                if nb_channels >= 4:
+                    expected[:, :, -1] = 83
+                assert np.array_equal(observed, expected)
+                assert observed.shape == (4, 3, nb_channels)
+                assert observed.dtype.name == "uint8"
+                assert observed is image_cp
+
+    def test_multipliers_hw(self):
+        nb_channels = 3
+        image = np.full((4, 3, nb_channels), 10, dtype=np.uint8)
+        image_cp = np.copy(image)
+        multipliers = np.full((4, 3), 2.7, dtype=np.float32)
+
+        observed = _multiply_elementwise_to_uint8_(image_cp,
+                                                   multipliers)
+
+        expected = np.full((4, 3, nb_channels), 27, dtype=np.uint8)
+        assert np.array_equal(observed, expected)
+        assert observed.shape == (4, 3, nb_channels)
+        assert observed.dtype.name == "uint8"
+        assert observed is image_cp
+
+    def test_multipliers_hw1(self):
+        nb_channels = 3
+        image = np.full((4, 3, nb_channels), 10, dtype=np.uint8)
+        image_cp = np.copy(image)
+        multipliers = np.full((4, 3, 1), 2.7, dtype=np.float32)
+
+        observed = _multiply_elementwise_to_uint8_(image_cp,
+                                                   multipliers)
+
+        expected = np.full((4, 3, nb_channels), 27, dtype=np.uint8)
+        assert np.array_equal(observed, expected)
+        assert observed.shape == (4, 3, nb_channels)
+        assert observed.dtype.name == "uint8"
+        assert observed is image_cp
+
+    def test_multipliers_is_float(self):
+        dtypes = ["float16", "float32", "float64"]
+        for dt in dtypes:
+            image = np.full((4, 3, 3), 10, dtype=np.uint8)
+            image_cp = np.copy(image)
+            multipliers = np.full((4, 3, 3), 1, dtype=dt)
+            multipliers[:, :, 0] = 2.7
+            multipliers[:, :, 1] = 4.0
+            multipliers[:, :, 2] = 6.4
+
+            observed = _multiply_elementwise_to_uint8_(image_cp,
+                                                       multipliers)
+
+            expected = np.full((4, 3, 3), 10, dtype=np.uint8)
+            expected[:, :, 0] = 27
+            expected[:, :, 1] = 40
+            expected[:, :, 2] = 64
+            assert np.array_equal(observed, expected)
+            assert observed.shape == (4, 3, 3)
+            assert observed.dtype.name == "uint8"
+            assert observed is image_cp
+
+    def test_multipliers_is_uint_int(self):
+        dtypes = ["uint8", "uint16", "uint32", "uint64",
+                  "int8", "int16", "int32", "int64"]
+        for dt in dtypes:
+            with self.subTest(dtype=dt):
+                image = np.full((4, 3, 3), 10, dtype=np.uint8)
+                image_cp = np.copy(image)
+                multipliers = np.full((4, 3, 3), 1, dtype=dt)
+                multipliers[:, :, 0] = 2
+                multipliers[:, :, 1] = 4
+                multipliers[:, :, 2] = 5
+
+                observed = _multiply_elementwise_to_uint8_(image_cp,
+                                                           multipliers)
+
+                expected = np.full((4, 3, 3), 10, dtype=np.uint8)
+                expected[:, :, 0] = 20
+                expected[:, :, 1] = 40
+                expected[:, :, 2] = 50
+                assert np.array_equal(observed, expected)
+                assert observed.shape == (4, 3, 3)
+                assert observed.dtype.name == "uint8"
+                assert observed is image_cp
+
+    def test_image_is_view(self):
+        nb_channels = 3
+        image = np.full((4, 3, nb_channels), 10, dtype=np.uint8)
+        image_cp = np.copy(image)[0:3, :, :]
+        assert image_cp.flags["OWNDATA"] is False
+        assert image_cp.flags["C_CONTIGUOUS"] is True
+        multipliers = np.full((3, 3, 1), 2.7, dtype=np.float32)
+
+        observed = _multiply_elementwise_to_uint8_(image_cp,
+                                                   multipliers)
+
+        expected = np.full((3, 3, nb_channels), 27, dtype=np.uint8)
+        assert np.array_equal(observed, expected)
+        assert observed.shape == (3, 3, nb_channels)
+        assert observed.dtype.name == "uint8"
+
+    def test_image_is_noncontiguous(self):
+        nb_channels = 3
+        image = np.full((4, 3, nb_channels), 10, dtype=np.uint8, order="F")
+        assert image.flags["OWNDATA"] is True
+        assert image.flags["C_CONTIGUOUS"] is False
+        multipliers = np.full((4, 3, 1), 2.7, dtype=np.float32)
+
+        observed = _multiply_elementwise_to_uint8_(image,
+                                                   multipliers)
+
+        expected = np.full((4, 3, nb_channels), 27, dtype=np.uint8)
+        assert np.array_equal(observed, expected)
+        assert observed.shape == (4, 3, nb_channels)
+        assert observed.dtype.name == "uint8"
 
 
 class Test_cutout(unittest.TestCase):
@@ -369,6 +815,11 @@ class Test_fill_rectangle_gaussian_(unittest.TestCase):
                                                   image_aug[..., c])
 
     def test_other_dtypes_int_uint(self):
+        try:
+            high_res_dt = np.float128
+        except AttributeError:
+            high_res_dt = np.float64
+
         dtypes = ["uint8", "uint16", "uint32", "uint64",
                   "int8", "int16", "int32", "int64"]
         for dtype in dtypes:
@@ -402,8 +853,8 @@ class Test_fill_rectangle_gaussian_(unittest.TestCase):
                         cval=0, per_channel=per_channel, random_state=rng)
 
                     rect = image_aug[10:-10, 10:-10]
-                    mean = np.average(np.float128(rect))
-                    std = np.std(np.float128(rect) - center_value)
+                    mean = np.average(high_res_dt(rect))
+                    std = np.std(high_res_dt(rect) - center_value)
                     assert np.array_equal(image_aug[:10, :], image_cp[:10, :])
                     assert not np.array_equal(rect,
                                               image_cp[10:-10, 10:-10])
@@ -420,12 +871,18 @@ class Test_fill_rectangle_gaussian_(unittest.TestCase):
                                                       image_aug[..., c])
 
     def test_other_dtypes_float(self):
-        dtypes = ["float16", "float32", "float64", "float128"]
+        try:
+            high_res_dt = np.float128
+            dtypes = ["float16", "float32", "float64", "float128"]
+        except AttributeError:
+            high_res_dt = np.float64
+            dtypes = ["float16", "float32", "float64"]
+
         for dtype in dtypes:
             min_value = 0.0
             center_value = 0.5
             max_value = 1.0
-            dynamic_range = np.float128(max_value) - np.float128(min_value)
+            dynamic_range = high_res_dt(max_value) - high_res_dt(min_value)
 
             gaussian_min = iarandom.RNG(0).normal(min_value, 0.0001,
                                                   size=(1,))
@@ -455,8 +912,8 @@ class Test_fill_rectangle_gaussian_(unittest.TestCase):
                         cval=0, per_channel=per_channel, random_state=rng)
 
                     rect = image_aug[10:-10, 10:-10]
-                    mean = np.average(np.float128(rect))
-                    std = np.std(np.float128(rect) - center_value)
+                    mean = np.average(high_res_dt(rect))
+                    std = np.std(high_res_dt(rect) - center_value)
                     assert np.allclose(image_aug[:10, :], image_cp[:10, :],
                                        rtol=0, atol=1e-4)
                     assert not np.allclose(rect, image_cp[10:-10, 10:-10],
@@ -665,7 +1122,13 @@ class Test_fill_rectangle_constant_(unittest.TestCase):
                         assert np.all(image_aug[-10:-10, 10:-10] == min_value)
 
     def test_other_dtypes_float(self):
-        dtypes = ["float16", "float32", "float64", "float128"]
+        try:
+            high_res_dt = np.float128
+            dtypes = ["float16", "float32", "float64", "float128"]
+        except AttributeError:
+            high_res_dt = np.float64
+            dtypes = ["float16", "float32", "float64"]
+
         for dtype in dtypes:
             for per_channel in [False, True]:
                 min_value, center_value, max_value = \
@@ -680,8 +1143,8 @@ class Test_fill_rectangle_constant_(unittest.TestCase):
 
                     # Use this here instead of any(isclose(...)) because
                     # the latter one leads to overflow warnings.
-                    assert image.flat[0] <= np.float128(min_value) + 1.0
-                    assert image.flat[4] >= np.float128(max_value) - 1.0
+                    assert image.flat[0] <= high_res_dt(min_value) + 1.0
+                    assert image.flat[4] >= high_res_dt(max_value) - 1.0
 
                     image_cp = np.copy(image)
 
@@ -697,17 +1160,17 @@ class Test_fill_rectangle_constant_(unittest.TestCase):
                                        rtol=0, atol=1e-4)
                     if per_channel:
                         assert np.allclose(image_aug[10:-10, 10:-10, 0],
-                                           np.float128(min_value),
+                                           high_res_dt(min_value),
                                            rtol=0, atol=1e-4)
                         assert np.allclose(image_aug[10:-10, 10:-10, 1],
-                                           np.float128(10),
+                                           high_res_dt(10),
                                            rtol=0, atol=1e-4)
                         assert np.allclose(image_aug[10:-10, 10:-10, 2],
-                                           np.float128(max_value),
+                                           high_res_dt(max_value),
                                            rtol=0, atol=1e-4)
                     else:
                         assert np.allclose(image_aug[-10:-10, 10:-10],
-                                           np.float128(min_value),
+                                           high_res_dt(min_value),
                                            rtol=0, atol=1e-4)
 
 
@@ -982,16 +1445,15 @@ class TestAdd(unittest.TestCase):
         # test get_parameters()
         aug = iaa.Add(value=1, per_channel=False)
         params = aug.get_parameters()
-        assert isinstance(params[0], iap.Deterministic)
-        assert isinstance(params[1], iap.Deterministic)
+        is_parameter_instance(params[0], iap.Deterministic)
+        is_parameter_instance(params[1], iap.Deterministic)
         assert params[0].value == 1
         assert params[1].value == 0
 
     def test_heatmaps(self):
         # test heatmaps (not affected by augmenter)
-        base_img = np.ones((3, 3, 1), dtype=np.uint8) * 100
         aug = iaa.Add(value=10)
-        hm = ia.quokka_heatmap()
+        hm = ia.data.quokka_heatmap()
         hm_aug = aug.augment_heatmaps([hm])[0]
         assert np.allclose(hm.arr_0to1, hm_aug.arr_0to1)
 
@@ -1472,15 +1934,15 @@ class TestAddElementwise(unittest.TestCase):
         # test get_parameters()
         aug = iaa.AddElementwise(value=1, per_channel=False)
         params = aug.get_parameters()
-        assert isinstance(params[0], iap.Deterministic)
-        assert isinstance(params[1], iap.Deterministic)
+        is_parameter_instance(params[0], iap.Deterministic)
+        is_parameter_instance(params[1], iap.Deterministic)
         assert params[0].value == 1
         assert params[1].value == 0
 
     def test_heatmaps_dont_change(self):
         # test heatmaps (not affected by augmenter)
         aug = iaa.AddElementwise(value=10)
-        hm = ia.quokka_heatmap()
+        hm = ia.data.quokka_heatmap()
         hm_aug = aug.augment_heatmaps([hm])[0]
         assert np.allclose(hm.arr_0to1, hm_aug.arr_0to1)
 
@@ -1882,7 +2344,7 @@ class AdditiveGaussianNoise(unittest.TestCase):
         base_img = np.ones((16, 16, 1), dtype=np.uint8) * 128
 
         aug = iaa.AdditiveGaussianNoise(loc=0.5, scale=10)
-        hm = ia.quokka_heatmap()
+        hm = ia.data.quokka_heatmap()
         hm_aug = aug.augment_heatmaps([hm])[0]
         assert np.allclose(hm.arr_0to1, hm_aug.arr_0to1)
 
@@ -1899,8 +2361,8 @@ class TestCutout(unittest.TestCase):
     def test___init___defaults(self):
         aug = iaa.Cutout()
         assert aug.nb_iterations.value == 1
-        assert isinstance(aug.position[0], iap.Uniform)
-        assert isinstance(aug.position[1], iap.Uniform)
+        assert is_parameter_instance(aug.position[0], iap.Uniform)
+        assert is_parameter_instance(aug.position[1], iap.Uniform)
         assert np.isclose(aug.size.value, 0.2)
         assert aug.squared.value == 1
         assert aug.fill_mode.value == "constant"
@@ -2361,7 +2823,7 @@ class TestDropout(unittest.TestCase):
     def test_heatmaps_dont_change(self):
         # test heatmaps (not affected by augmenter)
         aug = iaa.Dropout(p=1.0)
-        hm = ia.quokka_heatmap()
+        hm = ia.data.quokka_heatmap()
         hm_aug = aug.augment_heatmaps([hm])[0]
         assert np.allclose(hm.arr_0to1, hm_aug.arr_0to1)
 
@@ -2455,7 +2917,7 @@ class TestCoarseDropout(unittest.TestCase):
     def test_heatmaps_dont_change(self):
         # test heatmaps (not affected by augmenter)
         aug = iaa.CoarseDropout(p=1.0, size_px=2)
-        hm = ia.quokka_heatmap()
+        hm = ia.data.quokka_heatmap()
         hm_aug = aug.augment_heatmaps([hm])[0]
         assert np.allclose(hm.arr_0to1, hm_aug.arr_0to1)
 
@@ -2471,19 +2933,19 @@ class TestDropout2d(unittest.TestCase):
 
     def test___init___defaults(self):
         aug = iaa.Dropout2d()
-        assert isinstance(aug.p, iap.Binomial)
+        assert is_parameter_instance(aug.p, iap.Binomial)
         assert np.isclose(aug.p.p.value, 1-0.1)
         assert aug.nb_keep_channels == 1
 
     def test___init___p_is_float(self):
         aug = iaa.Dropout2d(p=0.7)
-        assert isinstance(aug.p, iap.Binomial)
+        assert is_parameter_instance(aug.p, iap.Binomial)
         assert np.isclose(aug.p.p.value, 0.3)
         assert aug.nb_keep_channels == 1
 
     def test___init___nb_keep_channels_is_int(self):
         aug = iaa.Dropout2d(p=0, nb_keep_channels=2)
-        assert isinstance(aug.p, iap.Binomial)
+        assert is_parameter_instance(aug.p, iap.Binomial)
         assert np.isclose(aug.p.p.value, 1.0)
         assert aug.nb_keep_channels == 2
 
@@ -2728,7 +3190,7 @@ class TestDropout2d(unittest.TestCase):
     def test_get_parameters(self):
         aug = iaa.Dropout2d(p=0.7, nb_keep_channels=2)
         params = aug.get_parameters()
-        assert isinstance(params[0], iap.Binomial)
+        is_parameter_instance(params[0], iap.Binomial)
         assert np.isclose(params[0].p.value, 0.3)
         assert params[1] == 2
 
@@ -2789,9 +3251,14 @@ class TestDropout2d(unittest.TestCase):
                         assert np.sum(image_aug == 0) == 7
 
     def test_other_dtypes_float(self):
-        dts = ["float16", "float32", "float64", "float128"]
+        try:
+            high_res_dt = np.float128
+            dtypes = ["float16", "float32", "float64", "float128"]
+        except AttributeError:
+            high_res_dt = np.float64
+            dtypes = ["float16", "float32", "float64"]
 
-        for dt in dts:
+        for dt in dtypes:
             min_value, center_value, max_value = \
                 iadt.get_value_range_of_dtype(dt)
             values = [min_value, -10.0, center_value, 10.0, max_value]
@@ -2812,7 +3279,7 @@ class TestDropout2d(unittest.TestCase):
                         assert np.sum(_isclose(image_aug, value)) == 10
                     else:
                         assert (
-                            np.sum(_isclose(image_aug, np.float128(value)))
+                            np.sum(_isclose(image_aug, high_res_dt(value)))
                             == 3)
                         assert np.sum(image_aug == 0) == 7
 
@@ -2827,7 +3294,7 @@ class TestTotalDropout(unittest.TestCase):
 
     def test___init___p(self):
         aug = iaa.TotalDropout(p=0)
-        assert isinstance(aug.p, iap.Binomial)
+        assert is_parameter_instance(aug.p, iap.Binomial)
         assert np.isclose(aug.p.p.value, 1.0)
 
     def test_p_is_1(self):
@@ -3098,9 +3565,14 @@ class TestTotalDropout(unittest.TestCase):
                             assert np.sum(images_aug == value) == 5*3
 
     def test_other_dtypes_float(self):
-        dts = ["float16", "float32", "float64", "float128"]
+        try:
+            high_res_dt = np.float128
+            dtypes = ["float16", "float32", "float64", "float128"]
+        except AttributeError:
+            high_res_dt = np.float64
+            dtypes = ["float16", "float32", "float64"]
 
-        for dt in dts:
+        for dt in dtypes:
             min_value, center_value, max_value = \
                 iadt.get_value_range_of_dtype(dt)
             values = [min_value, -10.0, center_value, 10.0, max_value]
@@ -3122,7 +3594,7 @@ class TestTotalDropout(unittest.TestCase):
                             assert np.sum(_isclose(images_aug, 0.0)) == 5*3
                         else:
                             assert (
-                                np.sum(_isclose(images_aug, np.float128(value)))
+                                np.sum(_isclose(images_aug, high_res_dt(value)))
                                 == 5*3)
 
     def test_pickleable(self):
@@ -3344,15 +3816,15 @@ class TestMultiply(unittest.TestCase):
         # test get_parameters()
         aug = iaa.Multiply(mul=1, per_channel=False)
         params = aug.get_parameters()
-        assert isinstance(params[0], iap.Deterministic)
-        assert isinstance(params[1], iap.Deterministic)
+        is_parameter_instance(params[0], iap.Deterministic)
+        is_parameter_instance(params[1], iap.Deterministic)
         assert params[0].value == 1
         assert params[1].value == 0
 
     def test_heatmaps_dont_change(self):
         # test heatmaps (not affected by augmenter)
         aug = iaa.Multiply(mul=2)
-        hm = ia.quokka_heatmap()
+        hm = ia.data.quokka_heatmap()
         hm_aug = aug.augment_heatmaps([hm])[0]
         assert np.allclose(hm.arr_0to1, hm_aug.arr_0to1)
 
@@ -3843,15 +4315,15 @@ class TestMultiplyElementwise(unittest.TestCase):
         # test get_parameters()
         aug = iaa.MultiplyElementwise(mul=1, per_channel=False)
         params = aug.get_parameters()
-        assert isinstance(params[0], iap.Deterministic)
-        assert isinstance(params[1], iap.Deterministic)
+        is_parameter_instance(params[0], iap.Deterministic)
+        is_parameter_instance(params[1], iap.Deterministic)
         assert params[0].value == 1
         assert params[1].value == 0
 
     def test_heatmaps_dont_change(self):
         # test heatmaps (not affected by augmenter)
         aug = iaa.MultiplyElementwise(mul=2)
-        hm = ia.quokka_heatmap()
+        hm = ia.data.quokka_heatmap()
         hm_aug = aug.augment_heatmaps([hm])[0]
         assert np.allclose(hm.arr_0to1, hm_aug.arr_0to1)
 
@@ -4316,10 +4788,10 @@ class TestReplaceElementwise(unittest.TestCase):
         # test get_parameters()
         aug = iaa.ReplaceElementwise(mask=0.5, replacement=2, per_channel=False)
         params = aug.get_parameters()
-        assert isinstance(params[0], iap.Binomial)
-        assert isinstance(params[0].p, iap.Deterministic)
-        assert isinstance(params[1], iap.Deterministic)
-        assert isinstance(params[2], iap.Deterministic)
+        is_parameter_instance(params[0], iap.Binomial)
+        is_parameter_instance(params[0].p, iap.Deterministic)
+        is_parameter_instance(params[1], iap.Deterministic)
+        is_parameter_instance(params[2], iap.Deterministic)
         assert 0.5 - 1e-6 < params[0].p.value < 0.5 + 1e-6
         assert params[1].value == 2
         assert params[2].value == 0
@@ -4327,7 +4799,7 @@ class TestReplaceElementwise(unittest.TestCase):
     def test_heatmaps_dont_change(self):
         # test heatmaps (not affected by augmenter)
         aug = iaa.ReplaceElementwise(mask=1, replacement=0.5)
-        hm = ia.quokka_heatmap()
+        hm = ia.data.quokka_heatmap()
         hm_aug = aug.augment_heatmaps([hm])[0]
         assert np.allclose(hm.arr_0to1, hm_aug.arr_0to1)
 
@@ -4594,7 +5066,7 @@ class TestCoarseSaltAndPepper(unittest.TestCase):
     def test_heatmaps_dont_change(self):
         # test heatmaps (not affected by augmenter)
         aug = iaa.CoarseSaltAndPepper(p=1.0, size_px=2)
-        hm = ia.quokka_heatmap()
+        hm = ia.data.quokka_heatmap()
         hm_aug = aug.augment_heatmaps([hm])[0]
         assert np.allclose(hm.arr_0to1, hm_aug.arr_0to1)
 
@@ -4712,7 +5184,7 @@ class TestCoarseSalt(unittest.TestCase):
     def test_heatmaps_dont_change(self):
         # test heatmaps (not affected by augmenter)
         aug = iaa.CoarseSalt(p=1.0, size_px=2)
-        hm = ia.quokka_heatmap()
+        hm = ia.data.quokka_heatmap()
         hm_aug = aug.augment_heatmaps([hm])[0]
         assert np.allclose(hm.arr_0to1, hm_aug.arr_0to1)
 
@@ -4829,7 +5301,7 @@ class TestCoarsePepper(unittest.TestCase):
     def test_heatmaps_dont_change(self):
         # test heatmaps (not affected by augmenter)
         aug = iaa.CoarsePepper(p=1.0, size_px=2)
-        hm = ia.quokka_heatmap()
+        hm = ia.data.quokka_heatmap()
         hm_aug = aug.augment_heatmaps([hm])[0]
         assert np.allclose(hm.arr_0to1, hm_aug.arr_0to1)
 
@@ -5142,7 +5614,14 @@ class Test_invert_(unittest.TestCase):
 
     def test_float_with_threshold_50_inv_above(self):
         threshold = 50
-        dtypes = ["float16", "float32", "float64", "float128"]
+
+        try:
+            _high_res_dt = np.float128
+            dtypes = ["float16", "float32", "float64", "float128"]
+        except AttributeError:
+            _high_res_dt = np.float64
+            dtypes = ["float16", "float32", "float64"]
+
         for dt in dtypes:
             with self.subTest(dtype=dt):
                 min_value, center_value, max_value = \
@@ -5169,7 +5648,14 @@ class Test_invert_(unittest.TestCase):
 
     def test_float_with_threshold_50_inv_below(self):
         threshold = 50
-        dtypes = ["float16", "float32", "float64", "float128"]
+
+        try:
+            _high_res_dt = np.float128
+            dtypes = ["float16", "float32", "float64", "float128"]
+        except AttributeError:
+            _high_res_dt = np.float64
+            dtypes = ["float16", "float32", "float64"]
+
         for dt in dtypes:
             with self.subTest(dtype=dt):
                 min_value, center_value, max_value = \
@@ -5193,6 +5679,140 @@ class Test_invert_(unittest.TestCase):
                                        invert_above_threshold=False)
 
                 assert np.allclose(observed, expected, rtol=0, atol=1e-4)
+
+
+class Test__invert_uint8_subtract_(unittest.TestCase):
+    def test_fails_with_size_4(self):
+        # cv2 seems to fail in same cases when input arrays have exactly 4
+        # components.
+        # We verify here that this is the case.
+        # If this test method fails, it means that the code runs merely
+        # sub-optimally as cv2 could be used for such arrays. The code is then
+        # not wrong though.
+        for shape in [(1, 2, 2), (2, 1, 2), (4, 1)]:
+            with self.subTest(shape=shape):
+                zeros = np.zeros(shape, dtype=np.uint8)
+
+                with self.assertRaises(cv2.error):
+                    _ = _invert_uint8_subtract_(zeros, 255)
+
+    def test_0_inverted_to_255_all_small_shapes(self):
+        # this includes zero-sized axes
+        for height in np.arange(8):
+            for width in np.arange(8):
+                # cv2 fails on area==4, we use a LUT function for that case
+                if height * width == 4:
+                    continue
+
+                for nb_channels in [None, 1, 3]:
+                    channels_tpl = (nb_channels,)
+                    if nb_channels is None:
+                        channels_tpl = tuple()
+                    shape = (height, width) + channels_tpl
+
+                    with self.subTest(shape=shape):
+                        zeros = np.zeros(shape, dtype=np.uint8)
+
+                        observed = _invert_uint8_subtract_(np.copy(zeros), 255)
+
+                        expected = np.full(shape, 255, dtype=np.uint8)
+                        assert observed.dtype.name == "uint8"
+                        assert np.array_equal(observed, expected)
+
+    def test_0_inverted_to_255(self):
+        for shape_hw in [(4, 8), (4, 4), (2, 4), (4, 2), (1, 16), (16, 1),
+                         (1, 2), (2, 1), (1, 1), (40, 60)]:
+            shapes_2d3d = [shape_hw]
+            for nb_channels in [1, 2, 3, 4, 5, 10, 512, 513]:
+                shapes_2d3d.append(shape_hw + (nb_channels,))
+
+            for shape in shapes_2d3d:
+                if np.prod(shape) == 4:
+                    continue
+
+                with self.subTest(shape=shape):
+                    zeros = np.zeros(shape, dtype=np.uint8)
+
+                    observed = _invert_uint8_subtract_(np.copy(zeros), 255)
+
+                    expected = np.full(shape, 255, dtype=np.uint8)
+                    assert observed.dtype.name == "uint8"
+                    assert np.array_equal(observed, expected)
+
+    def test_nonzero_values(self):
+        arr = np.array([0, 10, 20, 30, 40, 50], dtype=np.uint8).reshape((3, 2))
+
+        observed = _invert_uint8_subtract_(np.copy(arr), 255)
+
+        expected = np.array(
+            [255-0, 255-10, 255-20, 255-30, 255-40, 255-50],
+            dtype=np.uint8
+        ).reshape((3, 2))
+        assert observed.dtype.name == "uint8"
+        assert np.array_equal(observed, expected)
+
+    def test_noncontiguous(self):
+        for shape_hw in [(3, 2), (4, 8)]:
+            shapes_2d3d = [shape_hw]
+            for nb_channels in [1, 2, 3, 4, 5, 10, 512, 513]:
+                shapes_2d3d.append(shape_hw + (nb_channels,))
+
+            for shape in shapes_2d3d:
+                with self.subTest(shape=shape):
+                    zeros = np.zeros(shape, dtype=np.uint8, order="F")
+                    assert zeros.flags["C_CONTIGUOUS"] is False
+
+                    observed = _invert_uint8_subtract_(np.copy(zeros), 255)
+
+                    expected = np.full(shape, 255, dtype=np.uint8)
+                    assert observed.dtype.name == "uint8"
+                    assert np.array_equal(observed, expected)
+
+    def test_unusual_base_shapes(self):
+        for shape in [(5, 10, 514), (5, 1, 514), (1, 5, 514)]:
+            zeros = np.zeros(shape, dtype=np.uint8)
+            for nb_selected in [1, 2, 3, 5, 10, 512, 513]:
+                with self.subTest(shape=shape, nb_selected=nb_selected):
+                    mask = [False] * shape[-1]
+                    for c in np.arange(nb_selected):
+                        mask[c] = True
+                    zeros_view = np.copy(zeros)[:, :, mask]
+                    assert zeros_view.flags["OWNDATA"] is False
+                    assert zeros_view.base is not None
+                    assert (
+                        zeros_view.base.shape
+                        == (nb_selected, shape[0], shape[1])
+                    ), zeros_view.base.shape
+
+                    observed = _invert_uint8_subtract_(zeros_view, 255)
+
+                    expected = np.full(
+                        (shape[0], shape[1], nb_selected), 255, dtype=np.uint8
+                    )
+                    assert observed.dtype.name == "uint8"
+                    assert np.array_equal(observed, expected)
+
+    def test_view(self):
+        for shape_hw in [(1, 1), (1, 2), (2, 1), (4, 8), (40, 60)]:
+            shapes_2d3d = [shape_hw]
+            for nb_channels in [1, 2, 3, 4, 5, 10, 512, 513]:
+                shapes_2d3d.append(shape_hw + (nb_channels,))
+
+            for shape in shapes_2d3d:
+                if np.prod(shape) == 4:
+                    continue
+
+                with self.subTest(shape=shape):
+                    shape_pad = (shape[0] + 2,) + shape[1:]
+                    zeros = np.zeros(shape_pad, dtype=np.uint8)
+                    zeros_view = np.copy(zeros)[0:-2, ...]
+                    assert zeros_view.flags["OWNDATA"] is False
+
+                    observed = _invert_uint8_subtract_(zeros_view, 255)
+
+                    expected = np.full(shape, 255, dtype=np.uint8)
+                    assert observed.dtype.name == "uint8"
+                    assert np.array_equal(observed, expected)
 
 
 class Test_solarize(unittest.TestCase):
@@ -5481,82 +6101,117 @@ class TestInvert(unittest.TestCase):
     def test_heatmaps_dont_change(self):
         # test heatmaps (not affected by augmenter)
         aug = iaa.Invert(p=1.0)
-        hm = ia.quokka_heatmap()
+        hm = ia.data.quokka_heatmap()
         hm_aug = aug.augment_heatmaps([hm])[0]
         assert np.allclose(hm.arr_0to1, hm_aug.arr_0to1)
 
     def test_other_dtypes_p_is_zero(self):
         # with p=0.0
         aug = iaa.Invert(p=0.0)
-        dtypes = [bool,
-                  np.uint8, np.uint16, np.uint32, np.uint64,
-                  np.int8, np.int16, np.int32, np.int64,
-                  np.float16, np.float32, np.float64, np.float128]
+
+        try:
+            f128 = [np.dtype("float128")]
+        except TypeError:
+            f128 = []  # float128 not known by user system
+
+        dtypes = [
+            bool,
+            np.uint8, np.uint16, np.uint32, np.uint64,
+            np.int8, np.int16, np.int32, np.int64,
+            np.float16, np.float32, np.float64
+        ] + f128
+
         for dtype in dtypes:
-            min_value, center_value, max_value = iadt.get_value_range_of_dtype(dtype)
-            kind = np.dtype(dtype).kind
-            image_min = np.full((3, 3), min_value, dtype=dtype)
-            if dtype is not bool:
-                image_center = np.full((3, 3), center_value if kind == "f" else int(center_value), dtype=dtype)
-            image_max = np.full((3, 3), max_value, dtype=dtype)
-            image_min_aug = aug.augment_image(image_min)
-            image_center_aug = None
-            if dtype is not bool:
-                image_center_aug = aug.augment_image(image_center)
-            image_max_aug = aug.augment_image(image_max)
+            with self.subTest(dtype=dtype):
+                min_value, center_value, max_value = \
+                    iadt.get_value_range_of_dtype(dtype)
+                kind = np.dtype(dtype).kind
+                image_min = np.full((3, 3), min_value, dtype=dtype)
+                if dtype is not bool:
+                    image_center = (
+                        np.full(
+                            (3, 3),
+                            center_value if kind == "f" else int(center_value),
+                            dtype=dtype
+                        )
+                    )
+                image_max = np.full((3, 3), max_value, dtype=dtype)
+                image_min_aug = aug.augment_image(image_min)
+                image_center_aug = None
+                if dtype is not bool:
+                    image_center_aug = aug.augment_image(image_center)
+                image_max_aug = aug.augment_image(image_max)
 
-            assert image_min_aug.dtype == np.dtype(dtype)
-            if image_center_aug is not None:
-                assert image_center_aug.dtype == np.dtype(dtype)
-            assert image_max_aug.dtype == np.dtype(dtype)
+                assert image_min_aug.dtype == np.dtype(dtype)
+                if image_center_aug is not None:
+                    assert image_center_aug.dtype == np.dtype(dtype)
+                assert image_max_aug.dtype == np.dtype(dtype)
 
-            if dtype is bool:
-                assert np.all(image_min_aug == image_min)
-                assert np.all(image_max_aug == image_max)
-            elif np.dtype(dtype).kind in ["i", "u"]:
-                assert np.array_equal(image_min_aug, image_min)
-                assert np.array_equal(image_center_aug, image_center)
-                assert np.array_equal(image_max_aug, image_max)
-            else:
-                assert np.allclose(image_min_aug, image_min)
-                assert np.allclose(image_center_aug, image_center)
-                assert np.allclose(image_max_aug, image_max)
+                if dtype is bool:
+                    assert np.all(image_min_aug == image_min)
+                    assert np.all(image_max_aug == image_max)
+                elif np.dtype(dtype).kind in ["i", "u"]:
+                    assert np.array_equal(image_min_aug, image_min)
+                    assert np.array_equal(image_center_aug, image_center)
+                    assert np.array_equal(image_max_aug, image_max)
+                else:
+                    assert np.allclose(image_min_aug, image_min)
+                    assert np.allclose(image_center_aug, image_center)
+                    assert np.allclose(image_max_aug, image_max)
 
     def test_other_dtypes_p_is_one(self):
         # with p=1.0
         aug = iaa.Invert(p=1.0)
-        dtypes = [np.uint8, np.uint16, np.uint32, np.uint64,
-                  np.int8, np.int16, np.int32, np.int64,
-                  np.float16, np.float32, np.float64, np.float128]
+
+        try:
+            f128 = [np.dtype("float128")]
+        except TypeError:
+            f128 = []  # float128 not known by user system
+
+        dtypes = [
+            bool,
+            np.uint8, np.uint16, np.uint32, np.uint64,
+            np.int8, np.int16, np.int32, np.int64,
+            np.float16, np.float32, np.float64
+        ] + f128
+
         for dtype in dtypes:
-            min_value, center_value, max_value = iadt.get_value_range_of_dtype(dtype)
-            kind = np.dtype(dtype).kind
-            image_min = np.full((3, 3), min_value, dtype=dtype)
-            if dtype is not bool:
-                image_center = np.full((3, 3), center_value if kind == "f" else int(center_value), dtype=dtype)
-            image_max = np.full((3, 3), max_value, dtype=dtype)
-            image_min_aug = aug.augment_image(image_min)
-            image_center_aug = None
-            if dtype is not bool:
-                image_center_aug = aug.augment_image(image_center)
-            image_max_aug = aug.augment_image(image_max)
+            with self.subTest(dtype=dtype):
+                min_value, center_value, max_value = \
+                    iadt.get_value_range_of_dtype(dtype)
+                kind = np.dtype(dtype).kind
+                image_min = np.full((3, 3), min_value, dtype=dtype)
+                if dtype is not bool:
+                    image_center = (
+                        np.full(
+                            (3, 3),
+                            center_value if kind == "f" else int(center_value),
+                            dtype=dtype
+                        )
+                    )
+                image_max = np.full((3, 3), max_value, dtype=dtype)
+                image_min_aug = aug.augment_image(image_min)
+                image_center_aug = None
+                if dtype is not bool:
+                    image_center_aug = aug.augment_image(image_center)
+                image_max_aug = aug.augment_image(image_max)
 
-            assert image_min_aug.dtype == np.dtype(dtype)
-            if image_center_aug is not None:
-                assert image_center_aug.dtype == np.dtype(dtype)
-            assert image_max_aug.dtype == np.dtype(dtype)
+                assert image_min_aug.dtype == np.dtype(dtype)
+                if image_center_aug is not None:
+                    assert image_center_aug.dtype == np.dtype(dtype)
+                assert image_max_aug.dtype == np.dtype(dtype)
 
-            if dtype is bool:
-                assert np.all(image_min_aug == image_max)
-                assert np.all(image_max_aug == image_min)
-            elif np.dtype(dtype).kind in ["i", "u"]:
-                assert np.array_equal(image_min_aug, image_max)
-                assert np.allclose(image_center_aug, image_center, atol=1.0+1e-4, rtol=0)
-                assert np.array_equal(image_max_aug, image_min)
-            else:
-                assert np.allclose(image_min_aug, image_max)
-                assert np.allclose(image_center_aug, image_center)
-                assert np.allclose(image_max_aug, image_min)
+                if dtype is bool:
+                    assert np.all(image_min_aug == image_max)
+                    assert np.all(image_max_aug == image_min)
+                elif np.dtype(dtype).kind in ["i", "u"]:
+                    assert np.array_equal(image_min_aug, image_max)
+                    assert np.allclose(image_center_aug, image_center, atol=1.0+1e-4, rtol=0)
+                    assert np.array_equal(image_max_aug, image_min)
+                else:
+                    assert np.allclose(image_min_aug, image_max)
+                    assert np.allclose(image_center_aug, image_center)
+                    assert np.allclose(image_max_aug, image_min)
 
     def test_other_dtypes_p_is_one_with_min_value(self):
         # with p=1.0 and min_value
@@ -5799,7 +6454,7 @@ def deactivated_test_ContrastNormalization():
 
     # test heatmaps (not affected by augmenter)
     aug = iaa.ContrastNormalization(alpha=2)
-    hm = ia.quokka_heatmap()
+    hm = ia.data.quokka_heatmap()
     hm_aug = aug.augment_heatmaps([hm])[0]
     assert np.allclose(hm.arr_0to1, hm_aug.arr_0to1)
 """
@@ -5811,7 +6466,7 @@ class TestJpegCompression(unittest.TestCase):
 
     def test_compression_is_zero(self):
         # basic test at 0 compression
-        img = ia.quokka(extract="square", size=(64, 64))
+        img = ia.data.quokka(extract="square", size=(64, 64))
         aug = iaa.JpegCompression(0)
         img_aug = aug.augment_image(img)
         diff = np.average(np.abs(img.astype(np.float32) - img_aug.astype(np.float32)))
@@ -5819,7 +6474,7 @@ class TestJpegCompression(unittest.TestCase):
 
     def test_compression_is_90(self):
         # basic test at 90 compression
-        img = ia.quokka(extract="square", size=(64, 64))
+        img = ia.data.quokka(extract="square", size=(64, 64))
         aug = iaa.JpegCompression(90)
         img_aug = aug.augment_image(img)
         diff = np.average(np.abs(img.astype(np.float32) - img_aug.astype(np.float32)))
@@ -5827,7 +6482,7 @@ class TestJpegCompression(unittest.TestCase):
 
     def test___init__(self):
         aug = iaa.JpegCompression([0, 100])
-        assert isinstance(aug.compression, iap.Choice)
+        assert is_parameter_instance(aug.compression, iap.Choice)
         assert len(aug.compression.a) == 2
         assert aug.compression.a[0] == 0
         assert aug.compression.a[1] == 100
@@ -5839,7 +6494,7 @@ class TestJpegCompression(unittest.TestCase):
 
     def test_compression_is_stochastic_parameter(self):
         # test if stochastic parameters are used by augmentation
-        img = ia.quokka(extract="square", size=(64, 64))
+        img = ia.data.quokka(extract="square", size=(64, 64))
 
         class _TwoValueParam(iap.StochasticParameter):
             def __init__(self, v1, v2):
@@ -5865,7 +6520,7 @@ class TestJpegCompression(unittest.TestCase):
     def test_keypoints_dont_change(self):
         # test keypoints (not affected by augmenter)
         aug = iaa.JpegCompression(50)
-        kps = ia.quokka_keypoints()
+        kps = ia.data.quokka_keypoints()
         kps_aug = aug.augment_keypoints([kps])[0]
         for kp, kp_aug in zip(kps.keypoints, kps_aug.keypoints):
             assert np.allclose([kp.x, kp.y], [kp_aug.x, kp_aug.y])
@@ -5873,7 +6528,7 @@ class TestJpegCompression(unittest.TestCase):
     def test_heatmaps_dont_change(self):
         # test heatmaps (not affected by augmenter)
         aug = iaa.JpegCompression(50)
-        hm = ia.quokka_heatmap()
+        hm = ia.data.quokka_heatmap()
         hm_aug = aug.augment_heatmaps([hm])[0]
         assert np.allclose(hm.arr_0to1, hm_aug.arr_0to1)
 

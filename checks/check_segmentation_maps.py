@@ -7,7 +7,7 @@ from imgaug import augmenters as iaa
 
 
 def main():
-    quokka = ia.quokka(size=0.5)
+    quokka = ia.data.quokka(size=0.5)
     h, w = quokka.shape[0:2]
     c = 1
     segmap = np.zeros((h, w, c), dtype=np.int32)
@@ -93,6 +93,21 @@ def main():
 
     print("ElasticTransformation alpha=10, sig=3...")
     aug = iaa.ElasticTransformation(alpha=10.0, sigma=3.0)
+    aug_det = aug.to_deterministic()
+    quokka_aug = aug_det.augment_image(quokka)
+    segmaps_aug = aug_det.augment_segmentation_maps(segmap)
+    segmaps_drawn = segmap.draw_on_image(quokka)[0]
+    segmaps_aug_drawn = segmaps_aug.draw_on_image(quokka_aug)[0]
+
+    ia.imshow(
+        np.hstack([
+            segmaps_drawn,
+            segmaps_aug_drawn
+        ])
+    )
+
+    print("ElasticTransformation alpha=200, sig=20...")
+    aug = iaa.ElasticTransformation(alpha=200.0, sigma=20.0)
     aug_det = aug.to_deterministic()
     quokka_aug = aug_det.augment_image(quokka)
     segmaps_aug = aug_det.augment_segmentation_maps(segmap)

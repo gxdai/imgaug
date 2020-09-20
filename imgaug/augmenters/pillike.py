@@ -66,6 +66,7 @@ from . import contrast as contrastlib
 from . import geometric
 from . import size as sizelib
 from .. import parameters as iap
+from .. import dtypes as iadt
 
 
 # TODO some of the augmenters in this module broke on numpy arrays as
@@ -297,12 +298,12 @@ def equalize_(image, mask=None):
                   for c in np.arange(nb_channels)]
         return np.stack(result, axis=-1)
 
-    assert image.dtype.name == "uint8", (
-        "Expected image of dtype uint8, got dtype %s." % (image.dtype.name,))
+    iadt.allow_only_uint8({image.dtype})
+
     if mask is not None:
         assert mask.ndim == 2, (
             "Expected 2-dimensional mask, got shape %s." % (mask.shape,))
-        assert mask.dtype.name == "uint8", (
+        assert mask.dtype == iadt._UINT8_DTYPE, (
             "Expected mask of dtype uint8, got dtype %s." % (mask.dtype.name,))
 
     size = image.size
@@ -412,9 +413,7 @@ def autocontrast(image, cutoff=0, ignore=None):
         Contrast-enhanced image.
 
     """
-    assert image.dtype.name == "uint8", (
-        "Can apply autocontrast only to uint8 images, got dtype %s." % (
-            image.dtype.name,))
+    iadt.allow_only_uint8({image.dtype})
 
     if 0 in image.shape:
         return np.copy(image)
@@ -533,9 +532,7 @@ def _autocontrast_no_pil(image, cutoff, ignore):  # noqa: C901
 
 # Added in 0.4.0.
 def _apply_enhance_func(image, cls, factor):
-    assert image.dtype.name == "uint8", (
-        "Can apply PIL image enhancement only to uint8 images, "
-        "got dtype %s." % (image.dtype.name,))
+    iadt.allow_only_uint8({image.dtype})
 
     if 0 in image.shape:
         return np.copy(image)
@@ -729,9 +726,7 @@ def enhance_sharpness(image, factor):
 
 # Added in 0.4.0.
 def _filter_by_kernel(image, kernel):
-    assert image.dtype.name == "uint8", (
-        "Can apply PIL filters only to uint8 images, "
-        "got dtype %s." % (image.dtype.name,))
+    iadt.allow_only_uint8({image.dtype})
 
     if 0 in image.shape:
         return np.copy(image)
@@ -1129,61 +1124,24 @@ def _create_affine_matrix(scale_x=1.0, scale_y=1.0,
                           rotate_deg=0,
                           shear_x_deg=0, shear_y_deg=0,
                           center_px=(0, 0)):
+    from .geometric import _AffineMatrixGenerator, _RAD_PER_DEGREE
+
     scale_x = max(scale_x, 0.0001)
     scale_y = max(scale_y, 0.0001)
 
-    rotate_rad, shear_x_rad, shear_y_rad = np.deg2rad([rotate_deg,
-                                                       shear_x_deg,
-                                                       shear_y_deg])
-    rotate_rad = (-1) * rotate_rad
+    rotate_rad = rotate_deg * _RAD_PER_DEGREE
+    shear_x_rad = shear_x_deg * _RAD_PER_DEGREE
+    shear_y_rad = shear_y_deg * _RAD_PER_DEGREE
 
-    matrix_centerize = np.array([
-        [1, 0, (-1) * center_px[0]],
-        [0, 1, (-1) * center_px[1]],
-        [0, 0, 1]
-    ], dtype=np.float32)
+    matrix_gen = _AffineMatrixGenerator()
+    matrix_gen.translate(x_px=-center_px[0], y_px=-center_px[1])
+    matrix_gen.scale(x_frac=scale_x, y_frac=scale_y)
+    matrix_gen.translate(x_px=translate_x_px, y_px=translate_y_px)
+    matrix_gen.shear(x_rad=-shear_x_rad, y_rad=shear_y_rad)
+    matrix_gen.rotate(rotate_rad)
+    matrix_gen.translate(x_px=center_px[0], y_px=center_px[1])
 
-    matrix_scale = np.array([
-        [scale_x, 0, 0],
-        [0, scale_y, 0],
-        [0, 0, 1]
-    ], dtype=np.float32)
-
-    matrix_translate = np.array([
-        [1, 0, translate_x_px],
-        [0, 1, translate_y_px],
-        [0, 0, 1]
-    ], dtype=np.float32)
-
-    matrix_shear = np.array([
-        [1, np.tanh(shear_x_rad), 0],
-        [np.tanh(shear_y_rad), 1, 0],
-        [0, 0, 1]
-    ], dtype=np.float32)
-
-    matrix_rotate = np.array([
-        [np.cos(rotate_rad), np.sin(rotate_rad), 0],
-        [-np.sin(rotate_rad), np.cos(rotate_rad), 0],
-        [0, 0, 1]
-    ], dtype=np.float32)
-
-    matrix_decenterize = np.array([
-        [1, 0, center_px[0]],
-        [0, 1, center_px[1]],
-        [0, 0, 1]
-    ], dtype=np.float32)
-
-    matrix = np.array([
-        [1, 0, 0],
-        [0, 1, 0],
-        [0, 0, 1]
-    ], dtype=np.float32)
-    for other_matrix in [matrix_centerize,
-                         matrix_rotate, matrix_shear,
-                         matrix_scale, matrix_translate,
-                         matrix_decenterize]:
-        matrix = np.matmul(other_matrix, matrix)
-
+    matrix = matrix_gen.matrix
     matrix = np.linalg.inv(matrix)
 
     return matrix
@@ -1275,9 +1233,7 @@ def warp_affine(image,
         Image after affine transformation.
 
     """
-    assert image.dtype.name == "uint8", (
-        "Can apply PIL affine transformation only to uint8 images, "
-        "got dtype %s." % (image.dtype.name,))
+    iadt.allow_only_uint8({image.dtype})
 
     if 0 in image.shape:
         return np.copy(image)
@@ -1539,14 +1495,13 @@ class Autocontrast(contrastlib._ContrastFuncWrapper):
 
         super(Autocontrast, self).__init__(
             func, params1d, per_channel,
-            dtypes_allowed=["uint8"],
-            dtypes_disallowed=["uint16", "uint32", "uint64",
-                               "int8", "int16", "int32", "int64",
-                               "float16", "float32", "float64",
-                               "float16", "float32", "float64", "float96",
-                               "float128", "float256", "bool"],
+            dtypes_allowed="uint8",
+            dtypes_disallowed="uint16 uint32 uint64 int8 int16 int32 int64 "
+                              "float16 float32 float64 float128 "
+                              "bool",
             seed=seed, name=name,
-            random_state=random_state, deterministic=deterministic)
+            random_state=random_state, deterministic=deterministic
+        )
 
 
 # Added in 0.4.0.

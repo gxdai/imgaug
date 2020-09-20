@@ -26,7 +26,7 @@ from imgaug import parameters as iap
 from imgaug import dtypes as iadt
 from imgaug.testutils import (
     array_equal_lists, keypoints_equal, reseed, assert_cbaois_equal,
-    runtest_pickleable_uint8_img, assertWarns)
+    runtest_pickleable_uint8_img, assertWarns, is_parameter_instance)
 from imgaug.augmentables.heatmaps import HeatmapsOnImage
 from imgaug.augmentables.segmaps import SegmentationMapsOnImage
 import imgaug.augmenters.geometric as geometriclib
@@ -52,10 +52,10 @@ class TestAffine(unittest.TestCase):
 
         params = aug.get_parameters()
 
-        assert isinstance(params[0], iap.Deterministic)  # scale
+        assert is_parameter_instance(params[0], iap.Deterministic)  # scale
         assert isinstance(params[1], tuple)  # translate
-        assert isinstance(params[2], iap.Deterministic)  # rotate
-        assert isinstance(params[3], iap.Deterministic)  # shear
+        assert is_parameter_instance(params[2], iap.Deterministic)  # rotate
+        assert is_parameter_instance(params[3], iap.Deterministic)  # shear
         assert params[0].value == 1  # scale
         assert params[1][0].value == 2  # translate
         assert params[2].value == 3  # rotate
@@ -71,9 +71,9 @@ class TestAffine___init__(unittest.TestCase):
     def test___init___scale_is_stochastic_parameter(self):
         aug = iaa.Affine(scale=iap.Uniform(0.7, 0.9))
 
-        assert isinstance(aug.scale, iap.Uniform)
-        assert isinstance(aug.scale.a, iap.Deterministic)
-        assert isinstance(aug.scale.b, iap.Deterministic)
+        assert is_parameter_instance(aug.scale, iap.Uniform)
+        assert is_parameter_instance(aug.scale.a, iap.Deterministic)
+        assert is_parameter_instance(aug.scale.b, iap.Deterministic)
         assert 0.7 - 1e-8 < aug.scale.a.value < 0.7 + 1e-8
         assert 0.9 - 1e-8 < aug.scale.b.value < 0.9 + 1e-8
 
@@ -81,9 +81,9 @@ class TestAffine___init__(unittest.TestCase):
         aug = iaa.Affine(translate_percent=iap.Uniform(0.7, 0.9))
 
         assert isinstance(aug.translate, tuple)
-        assert isinstance(aug.translate[0], iap.Uniform)
-        assert isinstance(aug.translate[0].a, iap.Deterministic)
-        assert isinstance(aug.translate[0].b, iap.Deterministic)
+        assert is_parameter_instance(aug.translate[0], iap.Uniform)
+        assert is_parameter_instance(aug.translate[0].a, iap.Deterministic)
+        assert is_parameter_instance(aug.translate[0].b, iap.Deterministic)
         assert 0.7 - 1e-8 < aug.translate[0].a.value < 0.7 + 1e-8
         assert 0.9 - 1e-8 < aug.translate[0].b.value < 0.9 + 1e-8
         assert aug.translate[1] is None
@@ -93,9 +93,9 @@ class TestAffine___init__(unittest.TestCase):
         aug = iaa.Affine(translate_px=iap.DiscreteUniform(1, 10))
 
         assert isinstance(aug.translate, tuple)
-        assert isinstance(aug.translate[0], iap.DiscreteUniform)
-        assert isinstance(aug.translate[0].a, iap.Deterministic)
-        assert isinstance(aug.translate[0].b, iap.Deterministic)
+        assert is_parameter_instance(aug.translate[0], iap.DiscreteUniform)
+        assert is_parameter_instance(aug.translate[0].a, iap.Deterministic)
+        assert is_parameter_instance(aug.translate[0].b, iap.Deterministic)
         assert aug.translate[0].a.value == 1
         assert aug.translate[0].b.value == 10
         assert aug.translate[1] is None
@@ -105,29 +105,29 @@ class TestAffine___init__(unittest.TestCase):
         aug = iaa.Affine(scale=1.0, translate_px=0, rotate=iap.Uniform(10, 20),
                          shear=0)
 
-        assert isinstance(aug.rotate, iap.Uniform)
-        assert isinstance(aug.rotate.a, iap.Deterministic)
+        assert is_parameter_instance(aug.rotate, iap.Uniform)
+        assert is_parameter_instance(aug.rotate.a, iap.Deterministic)
         assert aug.rotate.a.value == 10
-        assert isinstance(aug.rotate.b, iap.Deterministic)
+        assert is_parameter_instance(aug.rotate.b, iap.Deterministic)
         assert aug.rotate.b.value == 20
 
     def test___init___shear_is_stochastic_parameter(self):
         aug = iaa.Affine(scale=1.0, translate_px=0, rotate=0,
                          shear=iap.Uniform(10, 20))
 
-        assert isinstance(aug.shear, iap.Uniform)
-        assert isinstance(aug.shear.a, iap.Deterministic)
+        assert is_parameter_instance(aug.shear, iap.Uniform)
+        assert is_parameter_instance(aug.shear.a, iap.Deterministic)
         assert aug.shear.a.value == 10
-        assert isinstance(aug.shear.b, iap.Deterministic)
+        assert is_parameter_instance(aug.shear.b, iap.Deterministic)
         assert aug.shear.b.value == 20
 
     def test___init___cval_is_all(self):
         aug = iaa.Affine(scale=1.0, translate_px=100, rotate=0, shear=0,
                          cval=ia.ALL)
 
-        assert isinstance(aug.cval, iap.Uniform)
-        assert isinstance(aug.cval.a, iap.Deterministic)
-        assert isinstance(aug.cval.b, iap.Deterministic)
+        assert is_parameter_instance(aug.cval, iap.Uniform)
+        assert is_parameter_instance(aug.cval.a, iap.Deterministic)
+        assert is_parameter_instance(aug.cval.b, iap.Deterministic)
         assert aug.cval.a.value == 0
         assert aug.cval.b.value == 255
 
@@ -135,27 +135,27 @@ class TestAffine___init__(unittest.TestCase):
         aug = iaa.Affine(scale=1.0, translate_px=100, rotate=0, shear=0,
                          cval=iap.DiscreteUniform(1, 5))
 
-        assert isinstance(aug.cval, iap.DiscreteUniform)
-        assert isinstance(aug.cval.a, iap.Deterministic)
-        assert isinstance(aug.cval.b, iap.Deterministic)
+        assert is_parameter_instance(aug.cval, iap.DiscreteUniform)
+        assert is_parameter_instance(aug.cval.a, iap.Deterministic)
+        assert is_parameter_instance(aug.cval.b, iap.Deterministic)
         assert aug.cval.a.value == 1
         assert aug.cval.b.value == 5
 
     def test___init___mode_is_all(self):
         aug = iaa.Affine(scale=1.0, translate_px=100, rotate=0, shear=0,
                          cval=0, mode=ia.ALL)
-        assert isinstance(aug.mode, iap.Choice)
+        assert is_parameter_instance(aug.mode, iap.Choice)
 
     def test___init___mode_is_string(self):
         aug = iaa.Affine(scale=1.0, translate_px=100, rotate=0, shear=0,
                          cval=0, mode="edge")
-        assert isinstance(aug.mode, iap.Deterministic)
+        assert is_parameter_instance(aug.mode, iap.Deterministic)
         assert aug.mode.value == "edge"
 
     def test___init___mode_is_list(self):
         aug = iaa.Affine(scale=1.0, translate_px=100, rotate=0, shear=0,
                          cval=0, mode=["constant", "edge"])
-        assert isinstance(aug.mode, iap.Choice)
+        assert is_parameter_instance(aug.mode, iap.Choice)
         assert (
             len(aug.mode.a) == 2
             and "constant" in aug.mode.a
@@ -164,7 +164,7 @@ class TestAffine___init__(unittest.TestCase):
     def test___init___mode_is_stochastic_parameter(self):
         aug = iaa.Affine(scale=1.0, translate_px=100, rotate=0, shear=0,
                          cval=0, mode=iap.Choice(["constant", "edge"]))
-        assert isinstance(aug.mode, iap.Choice)
+        assert is_parameter_instance(aug.mode, iap.Choice)
         assert (
             len(aug.mode.a) == 2
             and "constant" in aug.mode.a
@@ -1852,28 +1852,29 @@ class TestAffine_rotate(unittest.TestCase):
         # measure alignment between images and heatmaps when rotating
         # here with smaller heatmaps
         for backend in ["auto", "cv2", "skimage"]:
-            aug = iaa.Affine(rotate=45, backend=backend)
+            with self.subTest(backend=backend):
+                aug = iaa.Affine(rotate=45, backend=backend)
 
-            image = np.zeros((56, 48), dtype=np.uint8)
-            image[:, 16:24+1] = 255
-            hm = ia.HeatmapsOnImage(
-                ia.imresize_single_image(
-                    image, (28, 24), interpolation="cubic"
-                ).astype(np.float32)/255,
-                shape=(56, 48)
-            )
+                image = np.zeros((56, 48), dtype=np.uint8)
+                image[:, 16:24+1] = 255
+                hm = ia.HeatmapsOnImage(
+                    ia.imresize_single_image(
+                        image, (28, 24), interpolation="cubic"
+                    ).astype(np.float32)/255,
+                    shape=(56, 48)
+                )
 
-            img_aug = aug.augment_image(image)
-            hm_aug = aug.augment_heatmaps([hm])[0]
+                img_aug = aug.augment_image(image)
+                hm_aug = aug.augment_heatmaps([hm])[0]
 
-            img_aug_mask = img_aug > 255*0.1
-            hm_aug_mask = ia.imresize_single_image(
-                hm_aug.arr_0to1, img_aug.shape[0:2], interpolation="cubic"
-            ) > 0.1
-            same = np.sum(img_aug_mask == hm_aug_mask[:, :, 0])
-            assert hm_aug.shape == (56, 48)
-            assert hm_aug.arr_0to1.shape == (28, 24, 1)
-            assert (same / img_aug_mask.size) >= 0.9
+                img_aug_mask = img_aug > 255*0.1
+                hm_aug_mask = ia.imresize_single_image(
+                    hm_aug.arr_0to1, img_aug.shape[0:2], interpolation="cubic"
+                ) > 0.1
+                same = np.sum(img_aug_mask == hm_aug_mask[:, :, 0])
+                assert hm_aug.shape == (56, 48)
+                assert hm_aug.arr_0to1.shape == (28, 24, 1)
+                assert (same / img_aug_mask.size) >= 0.9
 
     def test_bounding_boxes_have_expected_shape_after_augmentation(self):
         image = np.zeros((100, 100), dtype=np.uint8)
@@ -1982,6 +1983,20 @@ class TestAffine_cval(unittest.TestCase):
                 last_aug_det = observed_aug_det
 
         assert nb_changed_aug_det == 0
+
+    def test_float_cval_on_float_image(self):
+        aug = iaa.Affine(scale=1.0, translate_px=100, rotate=0, shear=0,
+                         cval=0.25)
+        image = np.full((10, 10, 3), 0.75, dtype=np.float32)
+        image_aug = aug(image=image)
+        assert np.allclose(image_aug, 0.25)
+
+    def test_float_cval_on_int_image(self):
+        aug = iaa.Affine(scale=1.0, translate_px=100, rotate=0, shear=0,
+                         cval=2.75)
+        image = np.full((10, 10, 3), 10, dtype=np.uint8)
+        image_aug = aug(image=image)
+        assert np.allclose(image_aug, 2)  # cval is casted to int, no rounding
 
 
 class TestAffine_fit_output(unittest.TestCase):
@@ -2696,8 +2711,14 @@ class TestAffine_other_dtypes(unittest.TestCase):
                 return np.isclose(a, b, atol=atol, rtol=0)
 
             isize = np.dtype(dtype).itemsize
-            values = [0.01, 1.0, 10.0, 100.0, 500 ** (isize - 1),
-                      1000 ** (isize - 1)]
+            values = [
+                0.01,
+                1.0,
+                10.0,
+                100.0,
+                500 ** (isize - 1),
+                float(np.float64(1000 ** (isize - 1)))
+            ]
             values = values + [(-1) * value for value in values]
             values = values + [min_value, max_value]
             for value in values:
@@ -2710,7 +2731,7 @@ class TestAffine_other_dtypes(unittest.TestCase):
                     assert image_aug.dtype.name == dtype
                     assert np.all(_isclose(image_aug[~self.translate_mask], 0))
                     assert np.all(_isclose(image_aug[self.translate_mask],
-                                           np.float128(value)))
+                                           value))
 
     def test_rotate_skimage_order_not_0_bool(self):
         # skimage, order!=0 and rotate=180
@@ -2878,8 +2899,14 @@ class TestAffine_other_dtypes(unittest.TestCase):
                 return np.isclose(a, b, atol=atol, rtol=0)
 
             isize = np.dtype(dtype).itemsize
-            values = [0.01, 1.0, 10.0, 100.0, 500 ** (isize - 1),
-                      1000 ** (isize - 1)]
+            values = [
+                0.01,
+                1.0,
+                10.0,
+                100.0,
+                500 ** (isize - 1),
+                float(np.float64(1000 ** (isize - 1)))
+            ]
             values = values + [(-1) * value for value in values]
             values = values + [min_value, max_value]
             for value in values:
@@ -2892,7 +2919,7 @@ class TestAffine_other_dtypes(unittest.TestCase):
                     assert image_aug.dtype.name == dtype
                     assert np.all(_isclose(image_aug[~self.translate_mask], 0))
                     assert np.all(_isclose(image_aug[self.translate_mask],
-                                           np.float128(value)))
+                                           value))
 
     def test_rotate_cv2_order_1_and_3_bool(self):
         # cv2, order=1 and rotate=180
@@ -3262,13 +3289,11 @@ class TestShearX(unittest.TestCase):
         x3, y3 = _find_coords(image_aug[..., 2])
         x4, y4 = _find_coords(image_aug[..., 3])
         assert x1 > 20
-        assert y1 > 10
-        assert y2 > 10
-        assert np.isclose(y1, y2)
+        assert np.isclose(y1, 10.0)
+        assert np.isclose(y2, 10.0)
         assert x3 < 30
-        assert y3 < 40
-        assert y4 < 40
-        assert np.isclose(y3, y4)
+        assert np.isclose(y3, 40.0)
+        assert np.isclose(y4, 40.0)
         assert not np.isclose(x1, x4)
         assert not np.isclose(x2, x3)
 
@@ -3310,13 +3335,11 @@ class TestShearY(unittest.TestCase):
         x3, y3 = _find_coords(image_aug[..., 2])
         x4, y4 = _find_coords(image_aug[..., 3])
         assert y1 < 20
-        assert x1 > 10
-        assert x4 > 10
-        assert np.isclose(x1, x4)
+        assert np.isclose(x1, 10.0)
+        assert np.isclose(x4, 10.0)
         assert y2 > 20
-        assert x2 < 40
-        assert x3 < 40
-        assert np.isclose(x2, x3)
+        assert np.isclose(x2, 40.0)
+        assert np.isclose(x3, 40.0)
         assert not np.isclose(y1, y2)
         assert not np.isclose(y3, y4)
 
@@ -3606,9 +3629,9 @@ def test_AffineCv2():
         assert nb_changed_aug_det == 0
 
         aug = iaa.AffineCv2(scale=iap.Uniform(0.7, 0.9))
-        assert isinstance(aug.scale, iap.Uniform)
-        assert isinstance(aug.scale.a, iap.Deterministic)
-        assert isinstance(aug.scale.b, iap.Deterministic)
+        assert is_parameter_instance(aug.scale, iap.Uniform)
+        assert is_parameter_instance(aug.scale.a, iap.Deterministic)
+        assert is_parameter_instance(aug.scale.b, iap.Deterministic)
         assert 0.7 - 1e-8 < aug.scale.a.value < 0.7 + 1e-8
         assert 0.9 - 1e-8 < aug.scale.b.value < 0.9 + 1e-8
 
@@ -3829,16 +3852,16 @@ def test_AffineCv2():
         assert (centers_aug < int(nb_iterations * (1/9 * 1.4))).all()
 
         aug = iaa.AffineCv2(translate_percent=iap.Uniform(0.7, 0.9))
-        assert isinstance(aug.translate, iap.Uniform)
-        assert isinstance(aug.translate.a, iap.Deterministic)
-        assert isinstance(aug.translate.b, iap.Deterministic)
+        assert is_parameter_instance(aug.translate, iap.Uniform)
+        assert is_parameter_instance(aug.translate.a, iap.Deterministic)
+        assert is_parameter_instance(aug.translate.b, iap.Deterministic)
         assert 0.7 - 1e-8 < aug.translate.a.value < 0.7 + 1e-8
         assert 0.9 - 1e-8 < aug.translate.b.value < 0.9 + 1e-8
 
         aug = iaa.AffineCv2(translate_px=iap.DiscreteUniform(1, 10))
-        assert isinstance(aug.translate, iap.DiscreteUniform)
-        assert isinstance(aug.translate.a, iap.Deterministic)
-        assert isinstance(aug.translate.b, iap.Deterministic)
+        assert is_parameter_instance(aug.translate, iap.DiscreteUniform)
+        assert is_parameter_instance(aug.translate.a, iap.Deterministic)
+        assert is_parameter_instance(aug.translate.b, iap.Deterministic)
         assert aug.translate.a.value == 1
         assert aug.translate.b.value == 10
 
@@ -3971,10 +3994,10 @@ def test_AffineCv2():
         # rotate by StochasticParameter
         aug = iaa.AffineCv2(scale=1.0, translate_px=0,
                             rotate=iap.Uniform(10, 20), shear=0)
-        assert isinstance(aug.rotate, iap.Uniform)
-        assert isinstance(aug.rotate.a, iap.Deterministic)
+        assert is_parameter_instance(aug.rotate, iap.Uniform)
+        assert is_parameter_instance(aug.rotate.a, iap.Deterministic)
         assert aug.rotate.a.value == 10
-        assert isinstance(aug.rotate.b, iap.Deterministic)
+        assert is_parameter_instance(aug.rotate.b, iap.Deterministic)
         assert aug.rotate.b.value == 20
 
         # random rotation 0-364 degrees
@@ -4030,10 +4053,10 @@ def test_AffineCv2():
         # shear by StochasticParameter
         aug = iaa.AffineCv2(scale=1.0, translate_px=0, rotate=0,
                             shear=iap.Uniform(10, 20))
-        assert isinstance(aug.shear, iap.Uniform)
-        assert isinstance(aug.shear.a, iap.Deterministic)
+        assert is_parameter_instance(aug.shear, iap.Uniform)
+        assert is_parameter_instance(aug.shear.a, iap.Deterministic)
         assert aug.shear.a.value == 10
-        assert isinstance(aug.shear.b, iap.Deterministic)
+        assert is_parameter_instance(aug.shear.b, iap.Deterministic)
         assert aug.shear.b.value == 20
 
         # ---------------------
@@ -4099,17 +4122,17 @@ def test_AffineCv2():
 
         aug = iaa.AffineCv2(scale=1.0, translate_px=100, rotate=0, shear=0,
                             cval=ia.ALL)
-        assert isinstance(aug.cval, iap.DiscreteUniform)
-        assert isinstance(aug.cval.a, iap.Deterministic)
-        assert isinstance(aug.cval.b, iap.Deterministic)
+        assert is_parameter_instance(aug.cval, iap.DiscreteUniform)
+        assert is_parameter_instance(aug.cval.a, iap.Deterministic)
+        assert is_parameter_instance(aug.cval.b, iap.Deterministic)
         assert aug.cval.a.value == 0
         assert aug.cval.b.value == 255
 
         aug = iaa.AffineCv2(scale=1.0, translate_px=100, rotate=0, shear=0,
                             cval=iap.DiscreteUniform(1, 5))
-        assert isinstance(aug.cval, iap.DiscreteUniform)
-        assert isinstance(aug.cval.a, iap.Deterministic)
-        assert isinstance(aug.cval.b, iap.Deterministic)
+        assert is_parameter_instance(aug.cval, iap.DiscreteUniform)
+        assert is_parameter_instance(aug.cval.a, iap.Deterministic)
+        assert is_parameter_instance(aug.cval.b, iap.Deterministic)
         assert aug.cval.a.value == 1
         assert aug.cval.b.value == 5
 
@@ -4118,14 +4141,14 @@ def test_AffineCv2():
         # ------------
         aug = iaa.AffineCv2(scale=1.0, translate_px=100, rotate=0, shear=0,
                             cval=0, mode=ia.ALL)
-        assert isinstance(aug.mode, iap.Choice)
+        assert is_parameter_instance(aug.mode, iap.Choice)
         aug = iaa.AffineCv2(scale=1.0, translate_px=100, rotate=0, shear=0,
                             cval=0, mode="replicate")
-        assert isinstance(aug.mode, iap.Deterministic)
+        assert is_parameter_instance(aug.mode, iap.Deterministic)
         assert aug.mode.value == "replicate"
         aug = iaa.AffineCv2(scale=1.0, translate_px=100, rotate=0, shear=0,
                             cval=0, mode=["replicate", "reflect"])
-        assert isinstance(aug.mode, iap.Choice)
+        assert is_parameter_instance(aug.mode, iap.Choice)
         assert (
             len(aug.mode.a) == 2
             and "replicate" in aug.mode.a
@@ -4133,7 +4156,7 @@ def test_AffineCv2():
         aug = iaa.AffineCv2(scale=1.0, translate_px=100, rotate=0, shear=0,
                             cval=0,
                             mode=iap.Choice(["replicate", "reflect"]))
-        assert isinstance(aug.mode, iap.Choice)
+        assert is_parameter_instance(aug.mode, iap.Choice)
         assert (
             len(aug.mode.a) == 2
             and "replicate" in aug.mode.a
@@ -4224,10 +4247,10 @@ def test_AffineCv2():
         aug = iaa.AffineCv2(scale=1, translate_px=2, rotate=3, shear=4,
                             order=1, cval=0, mode="constant")
         params = aug.get_parameters()
-        assert isinstance(params[0], iap.Deterministic)  # scale
-        assert isinstance(params[1], iap.Deterministic)  # translate
-        assert isinstance(params[2], iap.Deterministic)  # rotate
-        assert isinstance(params[3], iap.Deterministic)  # shear
+        assert is_parameter_instance(params[0], iap.Deterministic)  # scale
+        assert is_parameter_instance(params[1], iap.Deterministic)  # translate
+        assert is_parameter_instance(params[2], iap.Deterministic)  # rotate
+        assert is_parameter_instance(params[3], iap.Deterministic)  # shear
         assert params[0].value == 1  # scale
         assert params[1].value == 2  # translate
         assert params[2].value == 3  # rotate
@@ -4268,16 +4291,16 @@ class TestPiecewiseAffine(unittest.TestCase):
     def test___init___scale_is_list(self):
         # scale as list
         aug = iaa.PiecewiseAffine(scale=[0.01, 0.10], nb_rows=12, nb_cols=4)
-        assert isinstance(aug.scale, iap.Choice)
+        assert is_parameter_instance(aug.scale, iap.Choice)
         assert 0.01 - 1e-8 < aug.scale.a[0] < 0.01 + 1e-8
         assert 0.10 - 1e-8 < aug.scale.a[1] < 0.10 + 1e-8
 
     def test___init___scale_is_tuple(self):
         # scale as tuple
         aug = iaa.PiecewiseAffine(scale=(0.01, 0.10), nb_rows=12, nb_cols=4)
-        assert isinstance(aug.jitter.scale, iap.Uniform)
-        assert isinstance(aug.jitter.scale.a, iap.Deterministic)
-        assert isinstance(aug.jitter.scale.b, iap.Deterministic)
+        assert is_parameter_instance(aug.jitter.scale, iap.Uniform)
+        assert is_parameter_instance(aug.jitter.scale.a, iap.Deterministic)
+        assert is_parameter_instance(aug.jitter.scale.b, iap.Deterministic)
         assert 0.01 - 1e-8 < aug.jitter.scale.a.value < 0.01 + 1e-8
         assert 0.10 - 1e-8 < aug.jitter.scale.b.value < 0.10 + 1e-8
 
@@ -4285,9 +4308,9 @@ class TestPiecewiseAffine(unittest.TestCase):
         # scale as StochasticParameter
         aug = iaa.PiecewiseAffine(scale=iap.Uniform(0.01, 0.10), nb_rows=12,
                                   nb_cols=4)
-        assert isinstance(aug.jitter.scale, iap.Uniform)
-        assert isinstance(aug.jitter.scale.a, iap.Deterministic)
-        assert isinstance(aug.jitter.scale.b, iap.Deterministic)
+        assert is_parameter_instance(aug.jitter.scale, iap.Uniform)
+        assert is_parameter_instance(aug.jitter.scale.a, iap.Deterministic)
+        assert is_parameter_instance(aug.jitter.scale.b, iap.Deterministic)
         assert 0.01 - 1e-8 < aug.jitter.scale.a.value < 0.01 + 1e-8
         assert 0.10 - 1e-8 < aug.jitter.scale.b.value < 0.10 + 1e-8
 
@@ -4304,16 +4327,16 @@ class TestPiecewiseAffine(unittest.TestCase):
     def test___init___nb_rows_is_list(self):
         # rows as list
         aug = iaa.PiecewiseAffine(scale=0.05, nb_rows=[4, 20], nb_cols=4)
-        assert isinstance(aug.nb_rows, iap.Choice)
+        assert is_parameter_instance(aug.nb_rows, iap.Choice)
         assert aug.nb_rows.a[0] == 4
         assert aug.nb_rows.a[1] == 20
 
     def test___init___nb_rows_is_tuple(self):
         # rows as tuple
         aug = iaa.PiecewiseAffine(scale=0.05, nb_rows=(4, 20), nb_cols=4)
-        assert isinstance(aug.nb_rows, iap.DiscreteUniform)
-        assert isinstance(aug.nb_rows.a, iap.Deterministic)
-        assert isinstance(aug.nb_rows.b, iap.Deterministic)
+        assert is_parameter_instance(aug.nb_rows, iap.DiscreteUniform)
+        assert is_parameter_instance(aug.nb_rows.a, iap.Deterministic)
+        assert is_parameter_instance(aug.nb_rows.b, iap.Deterministic)
         assert aug.nb_rows.a.value == 4
         assert aug.nb_rows.b.value == 20
 
@@ -4321,9 +4344,9 @@ class TestPiecewiseAffine(unittest.TestCase):
         # rows as StochasticParameter
         aug = iaa.PiecewiseAffine(scale=0.05, nb_rows=iap.DiscreteUniform(4, 20),
                                   nb_cols=4)
-        assert isinstance(aug.nb_rows, iap.DiscreteUniform)
-        assert isinstance(aug.nb_rows.a, iap.Deterministic)
-        assert isinstance(aug.nb_rows.b, iap.Deterministic)
+        assert is_parameter_instance(aug.nb_rows, iap.DiscreteUniform)
+        assert is_parameter_instance(aug.nb_rows.a, iap.Deterministic)
+        assert is_parameter_instance(aug.nb_rows.b, iap.Deterministic)
         assert aug.nb_rows.a.value == 4
         assert aug.nb_rows.b.value == 20
 
@@ -4339,16 +4362,16 @@ class TestPiecewiseAffine(unittest.TestCase):
 
     def test___init___nb_cols_is_list(self):
         aug = iaa.PiecewiseAffine(scale=0.05, nb_rows=4, nb_cols=[4, 20])
-        assert isinstance(aug.nb_cols, iap.Choice)
+        assert is_parameter_instance(aug.nb_cols, iap.Choice)
         assert aug.nb_cols.a[0] == 4
         assert aug.nb_cols.a[1] == 20
 
     def test___init___nb_cols_is_tuple(self):
         # cols as tuple
         aug = iaa.PiecewiseAffine(scale=0.05, nb_rows=4, nb_cols=(4, 20))
-        assert isinstance(aug.nb_cols, iap.DiscreteUniform)
-        assert isinstance(aug.nb_cols.a, iap.Deterministic)
-        assert isinstance(aug.nb_cols.b, iap.Deterministic)
+        assert is_parameter_instance(aug.nb_cols, iap.DiscreteUniform)
+        assert is_parameter_instance(aug.nb_cols.a, iap.Deterministic)
+        assert is_parameter_instance(aug.nb_cols.b, iap.Deterministic)
         assert aug.nb_cols.a.value == 4
         assert aug.nb_cols.b.value == 20
 
@@ -4356,9 +4379,9 @@ class TestPiecewiseAffine(unittest.TestCase):
         # cols as StochasticParameter
         aug = iaa.PiecewiseAffine(scale=0.05, nb_rows=4,
                                   nb_cols=iap.DiscreteUniform(4, 20))
-        assert isinstance(aug.nb_cols, iap.DiscreteUniform)
-        assert isinstance(aug.nb_cols.a, iap.Deterministic)
-        assert isinstance(aug.nb_cols.b, iap.Deterministic)
+        assert is_parameter_instance(aug.nb_cols, iap.DiscreteUniform)
+        assert is_parameter_instance(aug.nb_cols.a, iap.Deterministic)
+        assert is_parameter_instance(aug.nb_cols.b, iap.Deterministic)
         assert aug.nb_cols.a.value == 4
         assert aug.nb_cols.b.value == 20
 
@@ -4375,28 +4398,28 @@ class TestPiecewiseAffine(unittest.TestCase):
     def test___init___order_is_int(self):
         # single int for order
         aug = iaa.PiecewiseAffine(scale=0.1, nb_rows=8, nb_cols=8, order=0)
-        assert isinstance(aug.order, iap.Deterministic)
+        assert is_parameter_instance(aug.order, iap.Deterministic)
         assert aug.order.value == 0
 
     def test___init___order_is_list(self):
         # list for order
         aug = iaa.PiecewiseAffine(scale=0.1, nb_rows=8, nb_cols=8,
                                   order=[0, 1, 3])
-        assert isinstance(aug.order, iap.Choice)
+        assert is_parameter_instance(aug.order, iap.Choice)
         assert all([v in aug.order.a for v in [0, 1, 3]])
 
     def test___init___order_is_stochastic_parameter(self):
         # StochasticParameter for order
         aug = iaa.PiecewiseAffine(scale=0.1, nb_rows=8, nb_cols=8,
                                   order=iap.Choice([0, 1, 3]))
-        assert isinstance(aug.order, iap.Choice)
+        assert is_parameter_instance(aug.order, iap.Choice)
         assert all([v in aug.order.a for v in [0, 1, 3]])
 
     def test___init___order_is_all(self):
         # ALL for order
         aug = iaa.PiecewiseAffine(scale=0.1, nb_rows=8, nb_cols=8,
                                   order=ia.ALL)
-        assert isinstance(aug.order, iap.Choice)
+        assert is_parameter_instance(aug.order, iap.Choice)
         assert all([v in aug.order.a for v in [0, 1, 3, 4, 5]])
 
     def test___init___bad_datatype_for_order_leads_to_failure(self):
@@ -4414,7 +4437,7 @@ class TestPiecewiseAffine(unittest.TestCase):
         # cval as list
         aug = iaa.PiecewiseAffine(scale=0.7, nb_rows=5, nb_cols=5,
                                   mode="constant", cval=[0, 10])
-        assert isinstance(aug.cval, iap.Choice)
+        assert is_parameter_instance(aug.cval, iap.Choice)
         assert aug.cval.a[0] == 0
         assert aug.cval.a[1] == 10
 
@@ -4422,9 +4445,9 @@ class TestPiecewiseAffine(unittest.TestCase):
         # cval as tuple
         aug = iaa.PiecewiseAffine(scale=0.1, nb_rows=8, nb_cols=8,
                                   mode="constant", cval=(0, 10))
-        assert isinstance(aug.cval, iap.Uniform)
-        assert isinstance(aug.cval.a, iap.Deterministic)
-        assert isinstance(aug.cval.b, iap.Deterministic)
+        assert is_parameter_instance(aug.cval, iap.Uniform)
+        assert is_parameter_instance(aug.cval.a, iap.Deterministic)
+        assert is_parameter_instance(aug.cval.b, iap.Deterministic)
         assert aug.cval.a.value == 0
         assert aug.cval.b.value == 10
 
@@ -4433,9 +4456,9 @@ class TestPiecewiseAffine(unittest.TestCase):
         aug = iaa.PiecewiseAffine(scale=0.1, nb_rows=8, nb_cols=8,
                                   mode="constant",
                                   cval=iap.DiscreteUniform(0, 10))
-        assert isinstance(aug.cval, iap.DiscreteUniform)
-        assert isinstance(aug.cval.a, iap.Deterministic)
-        assert isinstance(aug.cval.b, iap.Deterministic)
+        assert is_parameter_instance(aug.cval, iap.DiscreteUniform)
+        assert is_parameter_instance(aug.cval.a, iap.Deterministic)
+        assert is_parameter_instance(aug.cval.b, iap.Deterministic)
         assert aug.cval.a.value == 0
         assert aug.cval.b.value == 10
 
@@ -4443,9 +4466,9 @@ class TestPiecewiseAffine(unittest.TestCase):
         # ALL as cval
         aug = iaa.PiecewiseAffine(scale=0.1, nb_rows=8, nb_cols=8,
                                   mode="constant", cval=ia.ALL)
-        assert isinstance(aug.cval, iap.Uniform)
-        assert isinstance(aug.cval.a, iap.Deterministic)
-        assert isinstance(aug.cval.b, iap.Deterministic)
+        assert is_parameter_instance(aug.cval, iap.Uniform)
+        assert is_parameter_instance(aug.cval.a, iap.Deterministic)
+        assert is_parameter_instance(aug.cval.b, iap.Deterministic)
         assert aug.cval.a.value == 0
         assert aug.cval.b.value == 255
 
@@ -4463,14 +4486,14 @@ class TestPiecewiseAffine(unittest.TestCase):
         # single string for mode
         aug = iaa.PiecewiseAffine(scale=0.1, nb_rows=8, nb_cols=8,
                                   mode="nearest")
-        assert isinstance(aug.mode, iap.Deterministic)
+        assert is_parameter_instance(aug.mode, iap.Deterministic)
         assert aug.mode.value == "nearest"
 
     def test___init___mode_is_list(self):
         # list for mode
         aug = iaa.PiecewiseAffine(scale=0.1, nb_rows=8, nb_cols=8,
                                   mode=["nearest", "edge", "symmetric"])
-        assert isinstance(aug.mode, iap.Choice)
+        assert is_parameter_instance(aug.mode, iap.Choice)
         assert all([
             v in aug.mode.a for v in ["nearest", "edge", "symmetric"]
         ])
@@ -4480,7 +4503,7 @@ class TestPiecewiseAffine(unittest.TestCase):
         aug = iaa.PiecewiseAffine(
             scale=0.1, nb_rows=8, nb_cols=8,
             mode=iap.Choice(["nearest", "edge", "symmetric"]))
-        assert isinstance(aug.mode, iap.Choice)
+        assert is_parameter_instance(aug.mode, iap.Choice)
         assert all([
             v in aug.mode.a for v in ["nearest", "edge", "symmetric"]
         ])
@@ -4488,7 +4511,7 @@ class TestPiecewiseAffine(unittest.TestCase):
     def test___init___mode_is_all(self):
         # ALL for mode
         aug = iaa.PiecewiseAffine(scale=0.1, nb_rows=8, nb_cols=8, mode=ia.ALL)
-        assert isinstance(aug.mode, iap.Choice)
+        assert is_parameter_instance(aug.mode, iap.Choice)
         assert all([
             v in aug.mode.a
             for v
@@ -4866,17 +4889,19 @@ class TestPiecewiseAffine(unittest.TestCase):
 
     def test_scale_alignment_between_images_and_keypoints(self):
         # strong scale, measure alignment between images and keypoints
-        aug = iaa.PiecewiseAffine(scale=0.10, nb_rows=12, nb_cols=4)
+        # fairly large scale here, as otherwise keypoints can end up
+        # outside of the image plane
+        aug = iaa.PiecewiseAffine(scale=0.05, nb_rows=12, nb_cols=4)
         aug_det = aug.to_deterministic()
-        kps = [ia.Keypoint(x=5, y=15), ia.Keypoint(x=17, y=12)]
-        kpsoi = ia.KeypointsOnImage(kps, shape=(24, 30, 3))
-        img_kps = np.zeros((24, 30, 3), dtype=np.uint8)
+        kps = [ia.Keypoint(x=160, y=110), ia.Keypoint(x=140, y=90)]
+        kpsoi = ia.KeypointsOnImage(kps, shape=(200, 300, 3))
+        img_kps = np.zeros((200, 300, 3), dtype=np.uint8)
         img_kps = kpsoi.draw_on_image(img_kps, color=[255, 255, 255])
 
         img_kps_aug = aug_det.augment_image(img_kps)
         kpsoi_aug = aug_det.augment_keypoints([kpsoi])[0]
 
-        assert kpsoi_aug.shape == (24, 30, 3)
+        assert kpsoi_aug.shape == (200, 300, 3)
         bb1 = ia.BoundingBox(
             x1=kpsoi_aug.keypoints[0].x-1, y1=kpsoi_aug.keypoints[0].y-1,
             x2=kpsoi_aug.keypoints[0].x+1, y2=kpsoi_aug.keypoints[0].y+1)
@@ -5316,12 +5341,12 @@ class TestPiecewiseAffine(unittest.TestCase):
                                   cval=2, mode="constant",
                                   absolute_scale=False)
         params = aug.get_parameters()
-        assert isinstance(params[0], iap.Deterministic)
-        assert isinstance(params[1], iap.Deterministic)
-        assert isinstance(params[2], iap.Deterministic)
-        assert isinstance(params[3], iap.Deterministic)
-        assert isinstance(params[4], iap.Deterministic)
-        assert isinstance(params[5], iap.Deterministic)
+        assert params[0] is aug.jitter.scale
+        assert params[1] is aug.nb_rows
+        assert params[2] is aug.nb_cols
+        assert params[3] is aug.order
+        assert params[4] is aug.cval
+        assert params[5] is aug.mode
         assert params[6] is False
         assert 0.1 - 1e-8 < params[0].value < 0.1 + 1e-8
         assert params[1].value == 8
@@ -5396,8 +5421,14 @@ class TestPiecewiseAffine(unittest.TestCase):
                 return np.isclose(a, b, atol=atol, rtol=0)
 
             isize = np.dtype(dtype).itemsize
-            values = [0.01, 1.0, 10.0, 100.0, 500 ** (isize - 1),
-                      1000 ** (isize - 1)]
+            values = [
+                0.01,
+                1.0,
+                10.0,
+                100.0,
+                500 ** (isize - 1),
+                float(np.float64(1000 ** (isize - 1)))
+            ]
             values = values + [(-1) * value for value in values]
             values = values + [min_value, max_value]
             for value in values:
@@ -5408,12 +5439,9 @@ class TestPiecewiseAffine(unittest.TestCase):
                     image_aug = aug.augment_image(image)
 
                     assert image_aug.dtype.name == dtype
-                    # TODO switch all other tests from float(...) to
-                    #      np.float128(...) pattern, seems to be more accurate
-                    #      for 128bit floats
-                    assert not np.all(_isclose(image_aug, np.float128(value)))
+                    assert not np.all(_isclose(image_aug, value))
                     assert np.any(_isclose(image_aug[~self.other_dtypes_mask],
-                                           np.float128(value)))
+                                           value))
 
     def test_pickleable(self):
         aug = iaa.PiecewiseAffine(scale=0.2, nb_rows=4, nb_cols=4, seed=1)
@@ -5446,16 +5474,16 @@ class TestPerspectiveTransform(unittest.TestCase):
     def test___init___scale_is_tuple(self):
         # tuple for scale
         aug = iaa.PerspectiveTransform(scale=(0.1, 0.2))
-        assert isinstance(aug.jitter.scale, iap.Uniform)
-        assert isinstance(aug.jitter.scale.a, iap.Deterministic)
-        assert isinstance(aug.jitter.scale.b, iap.Deterministic)
+        assert is_parameter_instance(aug.jitter.scale, iap.Uniform)
+        assert is_parameter_instance(aug.jitter.scale.a, iap.Deterministic)
+        assert is_parameter_instance(aug.jitter.scale.b, iap.Deterministic)
         assert 0.1 - 1e-8 < aug.jitter.scale.a.value < 0.1 + 1e-8
         assert 0.2 - 1e-8 < aug.jitter.scale.b.value < 0.2 + 1e-8
 
     def test___init___scale_is_list(self):
         # list for scale
         aug = iaa.PerspectiveTransform(scale=[0.1, 0.2, 0.3])
-        assert isinstance(aug.jitter.scale, iap.Choice)
+        assert is_parameter_instance(aug.jitter.scale, iap.Choice)
         assert len(aug.jitter.scale.a) == 3
         assert 0.1 - 1e-8 < aug.jitter.scale.a[0] < 0.1 + 1e-8
         assert 0.2 - 1e-8 < aug.jitter.scale.a[1] < 0.2 + 1e-8
@@ -5464,7 +5492,7 @@ class TestPerspectiveTransform(unittest.TestCase):
     def test___init___scale_is_stochastic_parameter(self):
         # StochasticParameter for scale
         aug = iaa.PerspectiveTransform(scale=iap.Choice([0.1, 0.2, 0.3]))
-        assert isinstance(aug.jitter.scale, iap.Choice)
+        assert is_parameter_instance(aug.jitter.scale, iap.Choice)
         assert len(aug.jitter.scale.a) == 3
         assert 0.1 - 1e-8 < aug.jitter.scale.a[0] < 0.1 + 1e-8
         assert 0.2 - 1e-8 < aug.jitter.scale.a[1] < 0.2 + 1e-8
@@ -5482,16 +5510,16 @@ class TestPerspectiveTransform(unittest.TestCase):
 
     def test___init___mode_is_all(self):
         aug = iaa.PerspectiveTransform(cval=0, mode=ia.ALL)
-        assert isinstance(aug.mode, iap.Choice)
+        assert is_parameter_instance(aug.mode, iap.Choice)
 
     def test___init___mode_is_string(self):
         aug = iaa.PerspectiveTransform(cval=0, mode="replicate")
-        assert isinstance(aug.mode, iap.Deterministic)
+        assert is_parameter_instance(aug.mode, iap.Deterministic)
         assert aug.mode.value == "replicate"
 
     def test___init___mode_is_list(self):
         aug = iaa.PerspectiveTransform(cval=0, mode=["replicate", "constant"])
-        assert isinstance(aug.mode, iap.Choice)
+        assert is_parameter_instance(aug.mode, iap.Choice)
         assert (
             len(aug.mode.a) == 2
             and "replicate" in aug.mode.a
@@ -5500,7 +5528,7 @@ class TestPerspectiveTransform(unittest.TestCase):
     def test___init___mode_is_stochastic_parameter(self):
         aug = iaa.PerspectiveTransform(
             cval=0, mode=iap.Choice(["replicate", "constant"]))
-        assert isinstance(aug.mode, iap.Choice)
+        assert is_parameter_instance(aug.mode, iap.Choice)
         assert (
             len(aug.mode.a) == 2
             and "replicate" in aug.mode.a
@@ -6112,7 +6140,7 @@ class TestPerspectiveTransform(unittest.TestCase):
         bbsoi = ia.BoundingBoxesOnImage(bbs, shape=img.shape)
         aug = iaa.PerspectiveTransform(scale=(0.05, 0.2), keep_size=True)
 
-        for _ in sm.xrange(10):
+        for _ in sm.xrange(30):
             imgs_aug, bbsois_aug = aug(
                 images=[img, img, img, img],
                 bounding_boxes=[bbsoi, bbsoi, bbsoi, bbsoi])
@@ -6137,7 +6165,7 @@ class TestPerspectiveTransform(unittest.TestCase):
                         assert np.max(rgt_row) > 10
                     else:
                         nb_skipped += 1
-            assert nb_skipped <= 2
+            assert nb_skipped <= 3
 
     def test_bounding_boxes_cover_extreme_points(self):
         # Test that for BBs, the augmented BB x coord is really the minimum
@@ -6526,8 +6554,8 @@ class TestPerspectiveTransform(unittest.TestCase):
     def test_get_parameters(self):
         aug = iaa.PerspectiveTransform(scale=0.1, keep_size=False)
         params = aug.get_parameters()
-        assert isinstance(params[0], iap.Normal)
-        assert isinstance(params[0].scale, iap.Deterministic)
+        assert is_parameter_instance(params[0], iap.Normal)
+        assert is_parameter_instance(params[0].scale, iap.Deterministic)
         assert 0.1 - 1e-8 < params[0].scale.value < 0.1 + 1e-8
         assert params[1] is False
         assert params[2].value == 0
@@ -6703,18 +6731,18 @@ class TestElasticTransformation(unittest.TestCase):
     def test___init___alpha_is_tuple(self):
         # test alpha being tuple
         aug = iaa.ElasticTransformation(alpha=(1.0, 2.0), sigma=0.25)
-        assert isinstance(aug.alpha, iap.Uniform)
-        assert isinstance(aug.alpha.a, iap.Deterministic)
-        assert isinstance(aug.alpha.b, iap.Deterministic)
+        assert is_parameter_instance(aug.alpha, iap.Uniform)
+        assert is_parameter_instance(aug.alpha.a, iap.Deterministic)
+        assert is_parameter_instance(aug.alpha.b, iap.Deterministic)
         assert 1.0 - 1e-8 < aug.alpha.a.value < 1.0 + 1e-8
         assert 2.0 - 1e-8 < aug.alpha.b.value < 2.0 + 1e-8
 
     def test___init___sigma_is_tuple(self):
         # test sigma being tuple
         aug = iaa.ElasticTransformation(alpha=0.25, sigma=(1.0, 2.0))
-        assert isinstance(aug.sigma, iap.Uniform)
-        assert isinstance(aug.sigma.a, iap.Deterministic)
-        assert isinstance(aug.sigma.b, iap.Deterministic)
+        assert is_parameter_instance(aug.sigma, iap.Uniform)
+        assert is_parameter_instance(aug.sigma.a, iap.Deterministic)
+        assert is_parameter_instance(aug.sigma.b, iap.Deterministic)
         assert 1.0 - 1e-8 < aug.sigma.a.value < 1.0 + 1e-8
         assert 2.0 - 1e-8 < aug.sigma.b.value < 2.0 + 1e-8
 
@@ -6730,23 +6758,23 @@ class TestElasticTransformation(unittest.TestCase):
 
     def test___init___order_is_all(self):
         aug = iaa.ElasticTransformation(alpha=0.25, sigma=1.0, order=ia.ALL)
-        assert isinstance(aug.order, iap.Choice)
+        assert is_parameter_instance(aug.order, iap.Choice)
         assert all([order in aug.order.a for order in [0, 1, 2, 3, 4, 5]])
 
     def test___init___order_is_int(self):
         aug = iaa.ElasticTransformation(alpha=0.25, sigma=1.0, order=1)
-        assert isinstance(aug.order, iap.Deterministic)
+        assert is_parameter_instance(aug.order, iap.Deterministic)
         assert aug.order.value == 1
 
     def test___init___order_is_list(self):
         aug = iaa.ElasticTransformation(alpha=0.25, sigma=1.0, order=[0, 1, 2])
-        assert isinstance(aug.order, iap.Choice)
+        assert is_parameter_instance(aug.order, iap.Choice)
         assert all([order in aug.order.a for order in [0, 1, 2]])
 
     def test___init___order_is_stochastic_parameter(self):
         aug = iaa.ElasticTransformation(alpha=0.25, sigma=1.0,
                                         order=iap.Choice([0, 1, 2, 3]))
-        assert isinstance(aug.order, iap.Choice)
+        assert is_parameter_instance(aug.order, iap.Choice)
         assert all([order in aug.order.a for order in [0, 1, 2, 3]])
 
     def test___init___bad_datatype_for_order_leads_to_failure(self):
@@ -6760,34 +6788,34 @@ class TestElasticTransformation(unittest.TestCase):
 
     def test___init___cval_is_all(self):
         aug = iaa.ElasticTransformation(alpha=0.25, sigma=1.0, cval=ia.ALL)
-        assert isinstance(aug.cval, iap.Uniform)
-        assert isinstance(aug.cval.a, iap.Deterministic)
-        assert isinstance(aug.cval.b, iap.Deterministic)
+        assert is_parameter_instance(aug.cval, iap.Uniform)
+        assert is_parameter_instance(aug.cval.a, iap.Deterministic)
+        assert is_parameter_instance(aug.cval.b, iap.Deterministic)
         assert aug.cval.a.value == 0
         assert aug.cval.b.value == 255
 
     def test___init___cval_is_int(self):
         aug = iaa.ElasticTransformation(alpha=0.25, sigma=1.0, cval=128)
-        assert isinstance(aug.cval, iap.Deterministic)
+        assert is_parameter_instance(aug.cval, iap.Deterministic)
         assert aug.cval.value == 128
 
     def test___init___cval_is_list(self):
         aug = iaa.ElasticTransformation(alpha=0.25, sigma=1.0,
                                         cval=[16, 32, 64])
-        assert isinstance(aug.cval, iap.Choice)
+        assert is_parameter_instance(aug.cval, iap.Choice)
         assert all([cval in aug.cval.a for cval in [16, 32, 64]])
 
     def test___init___cval_is_stochastic_parameter(self):
         aug = iaa.ElasticTransformation(alpha=0.25, sigma=1.0,
                                         cval=iap.Choice([16, 32, 64]))
-        assert isinstance(aug.cval, iap.Choice)
+        assert is_parameter_instance(aug.cval, iap.Choice)
         assert all([cval in aug.cval.a for cval in [16, 32, 64]])
 
     def test___init___cval_is_tuple(self):
         aug = iaa.ElasticTransformation(alpha=0.25, sigma=1.0, cval=(128, 255))
-        assert isinstance(aug.cval, iap.Uniform)
-        assert isinstance(aug.cval.a, iap.Deterministic)
-        assert isinstance(aug.cval.b, iap.Deterministic)
+        assert is_parameter_instance(aug.cval, iap.Uniform)
+        assert is_parameter_instance(aug.cval.a, iap.Deterministic)
+        assert is_parameter_instance(aug.cval.b, iap.Deterministic)
         assert aug.cval.a.value == 128
         assert aug.cval.b.value == 255
 
@@ -6802,7 +6830,7 @@ class TestElasticTransformation(unittest.TestCase):
 
     def test___init___mode_is_all(self):
         aug = iaa.ElasticTransformation(alpha=0.25, sigma=1.0, mode=ia.ALL)
-        assert isinstance(aug.mode, iap.Choice)
+        assert is_parameter_instance(aug.mode, iap.Choice)
         assert all([
             mode in aug.mode.a
             for mode
@@ -6810,19 +6838,19 @@ class TestElasticTransformation(unittest.TestCase):
 
     def test___init___mode_is_string(self):
         aug = iaa.ElasticTransformation(alpha=0.25, sigma=1.0, mode="nearest")
-        assert isinstance(aug.mode, iap.Deterministic)
+        assert is_parameter_instance(aug.mode, iap.Deterministic)
         assert aug.mode.value == "nearest"
 
     def test___init___mode_is_list(self):
         aug = iaa.ElasticTransformation(
             alpha=0.25, sigma=1.0, mode=["constant", "nearest"])
-        assert isinstance(aug.mode, iap.Choice)
+        assert is_parameter_instance(aug.mode, iap.Choice)
         assert all([mode in aug.mode.a for mode in ["constant", "nearest"]])
 
     def test___init___mode_is_stochastic_parameter(self):
         aug = iaa.ElasticTransformation(
             alpha=0.25, sigma=1.0, mode=iap.Choice(["constant", "nearest"]))
-        assert isinstance(aug.mode, iap.Choice)
+        assert is_parameter_instance(aug.mode, iap.Choice)
         assert all([mode in aug.mode.a for mode in ["constant", "nearest"]])
 
     def test___init___bad_datatype_for_mode_leads_to_failure(self):
@@ -6839,7 +6867,7 @@ class TestElasticTransformation(unittest.TestCase):
     # -----------
     def test_images(self):
         # test basic funtionality
-        aug = iaa.ElasticTransformation(alpha=0.5, sigma=0.25)
+        aug = iaa.ElasticTransformation(alpha=5, sigma=0.25)
 
         observed = aug.augment_image(self.image)
 
@@ -6853,7 +6881,7 @@ class TestElasticTransformation(unittest.TestCase):
 
     def test_images_nonsquare(self):
         # test basic funtionality with non-square images
-        aug = iaa.ElasticTransformation(alpha=0.5, sigma=0.25)
+        aug = iaa.ElasticTransformation(alpha=2.0, sigma=0.25, order=3)
         img_nonsquare = np.zeros((50, 100), dtype=np.uint8) + 255
         img_nonsquare = np.pad(img_nonsquare, ((100, 100), (100, 100)),
                                mode="constant", constant_values=0)
@@ -7013,26 +7041,29 @@ class TestElasticTransformation(unittest.TestCase):
 
     def test_sigma_is_stochastic_parameter(self):
         # test sigma being iap.Choice
-        aug = iaa.ElasticTransformation(alpha=3.0,
-                                        sigma=iap.Choice([0.01, 5.0]))
-        seen = [0, 0]
-        for _ in sm.xrange(100):
-            observed = aug.augment_image(self.image)
+        for order in [0, 1, 3]:
+            with self.subTest(order=order):
+                aug = iaa.ElasticTransformation(alpha=50.0,
+                                                sigma=iap.Choice([0.001, 5.0]),
+                                                order=order)
+                seen = [0, 0]
+                for _ in sm.xrange(100):
+                    observed = aug.augment_image(self.image)
 
-            observed_std_hori = np.std(
-                observed.astype(np.float32)[:, 1:]
-                - observed.astype(np.float32)[:, :-1])
-            observed_std_vert = np.std(
-                observed.astype(np.float32)[1:, :]
-                - observed.astype(np.float32)[:-1, :])
-            observed_std = (observed_std_hori + observed_std_vert) / 2
+                    observed_std_hori = np.std(
+                        observed.astype(np.float32)[:, 1:]
+                        - observed.astype(np.float32)[:, :-1])
+                    observed_std_vert = np.std(
+                        observed.astype(np.float32)[1:, :]
+                        - observed.astype(np.float32)[:-1, :])
+                    observed_std = (observed_std_hori + observed_std_vert) / 2
 
-            if observed_std > 10.0:
-                seen[0] += 1
-            else:
-                seen[1] += 1
-        assert seen[0] > 10
-        assert seen[1] > 10
+                    if observed_std > 25.0:
+                        seen[0] += 1
+                    else:
+                        seen[1] += 1
+                assert seen[0] > 10
+                assert seen[1] > 10
 
     # -----------
     # cval
@@ -7494,50 +7525,60 @@ class TestElasticTransformation(unittest.TestCase):
     # -----------
     def test_image_heatmaps_alignment(self):
         # test alignment between images and heatmaps
-        img = np.zeros((80, 80), dtype=np.uint8)
-        img[:, 30:50] = 255
-        img[30:50, :] = 255
-        hm = HeatmapsOnImage(img.astype(np.float32)/255.0, shape=(80, 80))
-        aug = iaa.ElasticTransformation(alpha=60.0, sigma=4.0, mode="constant",
-                                        cval=0)
-        aug_det = aug.to_deterministic()
+        for order in [0, 1, 3]:
+            with self.subTest(order=order):
+                img = np.zeros((80, 80), dtype=np.uint8)
+                img[:, 30:50] = 255
+                img[30:50, :] = 255
+                hm = HeatmapsOnImage(img.astype(np.float32)/255.0, shape=(80, 80))
+                aug = iaa.ElasticTransformation(
+                    alpha=60.0,
+                    sigma=4.0,
+                    mode="constant",
+                    cval=0,
+                    order=order
+                )
+                aug_det = aug.to_deterministic()
 
-        img_aug = aug_det.augment_image(img)
-        hm_aug = aug_det.augment_heatmaps([hm])[0]
+                img_aug = aug_det.augment_image(img)
+                hm_aug = aug_det.augment_heatmaps([hm])[0]
 
-        img_aug_mask = img_aug > 255*0.1
-        hm_aug_mask = hm_aug.arr_0to1 > 0.1
-        same = np.sum(img_aug_mask == hm_aug_mask[:, :, 0])
-        assert hm_aug.shape == (80, 80)
-        assert hm_aug.arr_0to1.shape == (80, 80, 1)
-        assert (same / img_aug_mask.size) >= 0.99
+                img_aug_mask = img_aug > 255*0.1
+                hm_aug_mask = hm_aug.arr_0to1 > 0.1
+                same = np.sum(img_aug_mask == hm_aug_mask[:, :, 0])
+                assert hm_aug.shape == (80, 80)
+                assert hm_aug.arr_0to1.shape == (80, 80, 1)
+                assert (same / img_aug_mask.size) >= 0.97
 
     def test_image_heatmaps_alignment_if_heatmaps_smaller_than_image(self):
         # test alignment between images and heatmaps
         # here with heatmaps that are smaller than the image
-        img = np.zeros((80, 80), dtype=np.uint8)
-        img[:, 30:50] = 255
-        img[30:50, :] = 255
-        img_small = ia.imresize_single_image(
-            img, (40, 40), interpolation="nearest")
-        hm = HeatmapsOnImage(
-            img_small.astype(np.float32)/255.0,
-            shape=(80, 80))
-        aug = iaa.ElasticTransformation(
-            alpha=60.0, sigma=4.0, mode="constant", cval=0)
-        aug_det = aug.to_deterministic()
+        for order in [0, 1, 3]:
+            with self.subTest(order=order):
+                img = np.zeros((80, 80), dtype=np.uint8)
+                img[:, 30:50] = 255
+                img[30:50, :] = 255
+                img_small = ia.imresize_single_image(
+                    img, (40, 40), interpolation="nearest")
+                hm = HeatmapsOnImage(
+                    img_small.astype(np.float32)/255.0,
+                    shape=(80, 80))
+                aug = iaa.ElasticTransformation(
+                    alpha=60.0, sigma=4.0, mode="constant", cval=0)
+                aug_det = aug.to_deterministic()
 
-        img_aug = aug_det.augment_image(img)
-        hm_aug = aug_det.augment_heatmaps([hm])[0]
+                img_aug = aug_det.augment_image(img)
+                hm_aug = aug_det.augment_heatmaps([hm])[0]
 
-        img_aug_mask = img_aug > 255*0.1
-        hm_aug_mask = ia.imresize_single_image(
-            hm_aug.arr_0to1, (80, 80), interpolation="nearest"
-        ) > 0.1
-        same = np.sum(img_aug_mask == hm_aug_mask[:, :, 0])
-        assert hm_aug.shape == (80, 80)
-        assert hm_aug.arr_0to1.shape == (40, 40, 1)
-        assert (same / img_aug_mask.size) >= 0.94
+                img_aug_mask = img_aug > 255*0.1
+                hm_aug_mask = ia.imresize_single_image(
+                    hm_aug.arr_0to1, (80, 80), interpolation="nearest"
+                ) > 0.1
+                same = np.sum(img_aug_mask == hm_aug_mask[:, :, 0])
+                assert hm_aug.shape == (80, 80)
+                assert hm_aug.arr_0to1.shape == (40, 40, 1)
+                # TODO this is a fairly low threshold, why is that the case?
+                assert (same / img_aug_mask.size) >= 0.9
 
     # -----------
     # segmaps alignment
@@ -7587,7 +7628,7 @@ class TestElasticTransformation(unittest.TestCase):
         same = np.sum(img_aug_mask == segmaps_aug_mask[:, :, 0])
         assert segmaps_aug.shape == (80, 80)
         assert segmaps_aug.arr.shape == (40, 40, 1)
-        assert (same / img_aug_mask.size) >= 0.94
+        assert (same / img_aug_mask.size) >= 0.93
 
     # ---------
     # unusual channel numbers
@@ -7644,11 +7685,11 @@ class TestElasticTransformation(unittest.TestCase):
         aug = iaa.ElasticTransformation(
             alpha=0.25, sigma=1.0, order=2, cval=10, mode="constant")
         params = aug.get_parameters()
-        assert isinstance(params[0], iap.Deterministic)
-        assert isinstance(params[1], iap.Deterministic)
-        assert isinstance(params[2], iap.Deterministic)
-        assert isinstance(params[3], iap.Deterministic)
-        assert isinstance(params[4], iap.Deterministic)
+        assert params[0] is aug.alpha
+        assert params[1] is aug.sigma
+        assert params[2] is aug.order
+        assert params[3] is aug.cval
+        assert params[4] is aug.mode
         assert 0.25 - 1e-8 < params[0].value < 0.25 + 1e-8
         assert 1.0 - 1e-8 < params[1].value < 1.0 + 1e-8
         assert params[2].value == 2
@@ -7702,8 +7743,14 @@ class TestElasticTransformation(unittest.TestCase):
                 return np.isclose(a, b, atol=atol, rtol=0)
 
             isize = np.dtype(dtype).itemsize
-            values = [0.01, 1.0, 10.0, 100.0, 500 ** (isize - 1),
-                      1000 ** (isize - 1)]
+            values = [
+                0.01,
+                1.0,
+                10.0,
+                100.0,
+                500 ** (isize - 1),
+                float(np.float64(1000 ** (isize - 1)))
+            ]
             values = values + [(-1) * value for value in values]
             for value in values:
                 with self.subTest(dtype=dtype, value=value):
@@ -7713,9 +7760,8 @@ class TestElasticTransformation(unittest.TestCase):
                     image_aug = aug.augment_image(image)
 
                     assert image_aug.dtype.name == dtype
-                    assert not np.all(_isclose(image_aug, np.float128(value)))
-                    assert np.any(_isclose(image_aug[~mask],
-                                           np.float128(value)))
+                    assert not np.all(_isclose(image_aug, value))
+                    assert np.any(_isclose(image_aug[~mask], value))
 
     def test_other_dtypes_bool_all_orders(self):
         mask = np.zeros((50, 50), dtype=bool)
@@ -7800,10 +7846,10 @@ class TestElasticTransformation(unittest.TestCase):
                     if order == 0:
                         assert image_aug.dtype.name == dtype
                         assert not np.all(
-                            _isclose(image_aug, np.float128(value))
+                            _isclose(image_aug, value)
                         )
                         assert np.any(
-                            _isclose(image_aug[~mask], np.float128(value))
+                            _isclose(image_aug[~mask], value)
                         )
                     else:
                         atol = (
@@ -7813,13 +7859,13 @@ class TestElasticTransformation(unittest.TestCase):
                         assert not np.all(
                             np.isclose(
                                 image_aug,
-                                np.float128(value),
+                                value,
                                 rtol=0, atol=atol
                             ))
                         assert np.any(
                             np.isclose(
                                 image_aug[~mask],
-                                np.float128(value),
+                                value,
                                 rtol=0, atol=atol
                             ))
 
@@ -8054,14 +8100,14 @@ class TestRot90(unittest.TestCase):
 
     def test___init___k_is_list(self):
         aug = iaa.Rot90([1, 3])
-        assert isinstance(aug.k, iap.Choice)
+        assert is_parameter_instance(aug.k, iap.Choice)
         assert len(aug.k.a) == 2
         assert aug.k.a[0] == 1
         assert aug.k.a[1] == 3
 
     def test___init___k_is_all(self):
         aug = iaa.Rot90(ia.ALL)
-        assert isinstance(aug.k, iap.Choice)
+        assert is_parameter_instance(aug.k, iap.Choice)
         assert len(aug.k.a) == 4
         assert aug.k.a == [0, 1, 2, 3]
 
@@ -8844,14 +8890,27 @@ class TestRot90(unittest.TestCase):
     def test_other_dtypes_float(self):
         aug = iaa.Rot90(2)
 
-        dtypes = ["float16", "float32", "float64", "float128"]
+        try:
+            high_res_dt = np.float128
+            dtypes = ["float16", "float32", "float64", "float128"]
+        except AttributeError:
+            high_res_dt = np.float64
+            dtypes = ["float16", "float32", "float64"]
+
         for dtype in dtypes:
             def _allclose(a, b):
                 atol = 1e-4 if dtype == "float16" else 1e-8
                 return np.allclose(a, b, atol=atol, rtol=0)
 
             isize = np.dtype(dtype).itemsize
-            values = [0, 1.0, 10.0, 100.0, 500 ** (isize-1), 1000 ** (isize-1)]
+            values = [
+                0,
+                1.0,
+                10.0,
+                100.0,
+                high_res_dt(500 ** (isize-1)),
+                high_res_dt(1000 ** (isize-1))
+            ]
             values = values + [(-1) * value for value in values]
             for value in values:
                 with self.subTest(dtype=dtype, value=value):
@@ -8862,7 +8921,7 @@ class TestRot90(unittest.TestCase):
 
                     assert image_aug.dtype.name == dtype
                     assert _allclose(image_aug[0, 0], 0)
-                    assert _allclose(image_aug[2, 2], np.float128(value))
+                    assert _allclose(image_aug[2, 2], high_res_dt(value))
 
     def test_pickleable(self):
         aug = iaa.Rot90([0, 1, 2, 3], seed=1)
@@ -9490,10 +9549,17 @@ class TestWithPolarWarping(unittest.TestCase):
 
 class Test_apply_jigsaw(unittest.TestCase):
     def test_no_movement(self):
-        dtypes = ["bool",
-                  "uint8", "uint16", "uint32", "uint64",
-                  "int8", "int16", "int32", "int64",
-                  "float16", "float32", "float64", "float128"]
+        dtypes = [
+            "bool",
+            "uint8", "uint16", "uint32", "uint64",
+            "int8", "int16", "int32", "int64",
+            "float16", "float32", "float64"
+        ]
+
+        try:
+            dtypes.append(np.dtype("float128"))
+        except TypeError:
+            pass  # float128 not known on system
 
         for dtype in dtypes:
             with self.subTest(dtype=dtype):
@@ -9538,10 +9604,17 @@ class Test_apply_jigsaw(unittest.TestCase):
                 assert np.array_equal(observed, arr)
 
     def _test_two_cells_moved__n_channels(self, nb_channels):
-        dtypes = ["bool",
-                  "uint8", "uint16", "uint32", "uint64",
-                  "int8", "int16", "int32", "int64",
-                  "float16", "float32", "float64", "float128"]
+        dtypes = [
+            "bool",
+            "uint8", "uint16", "uint32", "uint64",
+            "int8", "int16", "int32", "int64",
+            "float16", "float32", "float64"
+        ]
+
+        try:
+            dtypes.append(np.dtype("float128").name)
+        except TypeError:
+            pass  # float128 not known by user system
 
         for dtype in dtypes:
             with self.subTest(dtype=dtype):

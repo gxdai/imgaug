@@ -21,9 +21,9 @@ import six.moves as sm
 import cv2
 
 import imgaug as ia
-from imgaug.imgaug import _quokka_normalize_extract, _compute_resized_shape
 from imgaug import dtypes as iadt
 import imgaug.random as iarandom
+from imgaug.testutils import assertWarns
 
 # TODO clean up this file
 
@@ -50,14 +50,6 @@ def main():
     # test_derive_random_state()
     # test_derive_random_states()
     # test_forward_random_state()
-    test__quokka_normalize_extract()
-    test__compute_resized_shape()
-    test_quokka()
-    test_quokka_square()
-    test_quokka_heatmap()
-    test_quokka_segmentation_map()
-    test_quokka_keypoints()
-    test_quokka_bounding_boxes()
     # test_angle_between_vectors()
     test_compute_line_intersection_point()
     test_draw_text()
@@ -125,6 +117,38 @@ def test_is_single_float():
 
 def test_caller_name():
     assert ia.caller_name() == 'test_caller_name'
+
+
+class TestDeprecatedDataFunctions(unittest.TestCase):
+    def test_quokka(self):
+        with assertWarns(self, ia.DeprecationWarning):
+            img = ia.quokka()
+            assert ia.is_np_array(img)
+
+    def test_quokka_square(self):
+        with assertWarns(self, ia.DeprecationWarning):
+            img = ia.quokka_square()
+            assert ia.is_np_array(img)
+
+    def test_quokka_heatmap(self):
+        with assertWarns(self, ia.DeprecationWarning):
+            result = ia.quokka_heatmap()
+            assert isinstance(result, ia.HeatmapsOnImage)
+
+    def test_quokka_segmentation_map(self):
+        with assertWarns(self, ia.DeprecationWarning):
+            result = ia.quokka_segmentation_map()
+            assert isinstance(result, ia.SegmentationMapsOnImage)
+
+    def test_quokka_keypoints(self):
+        with assertWarns(self, ia.DeprecationWarning):
+            result = ia.quokka_keypoints()
+            assert isinstance(result, ia.KeypointsOnImage)
+
+    def test_quokka_bounding_boxes(self):
+        with assertWarns(self, ia.DeprecationWarning):
+            result = ia.quokka_bounding_boxes()
+            assert isinstance(result, ia.BoundingBoxesOnImage)
 
 
 def test_is_single_number():
@@ -405,268 +429,6 @@ def test_forward_random_state(mock_advance):
     mock_advance.assert_called_once_with(gen)
     assert len(caught_warnings) == 1
     assert "is deprecated" in str(caught_warnings[-1].message)
-
-
-def test__quokka_normalize_extract():
-    observed = _quokka_normalize_extract("square")
-    assert isinstance(observed, ia.BoundingBox)
-    assert observed.x1 == 0
-    assert observed.y1 == 0
-    assert observed.x2 == 643
-    assert observed.y2 == 643
-
-    observed = _quokka_normalize_extract((1, 1, 644, 642))
-    assert isinstance(observed, ia.BoundingBox)
-    assert observed.x1 == 1
-    assert observed.y1 == 1
-    assert observed.x2 == 644
-    assert observed.y2 == 642
-
-    observed = _quokka_normalize_extract(ia.BoundingBox(x1=1, y1=1, x2=644, y2=642))
-    assert isinstance(observed, ia.BoundingBox)
-    assert observed.x1 == 1
-    assert observed.y1 == 1
-    assert observed.x2 == 644
-    assert observed.y2 == 642
-
-    observed = _quokka_normalize_extract(
-        ia.BoundingBoxesOnImage([ia.BoundingBox(x1=1, y1=1, x2=644, y2=642)], shape=(643, 960, 3))
-    )
-    assert isinstance(observed, ia.BoundingBox)
-    assert observed.x1 == 1
-    assert observed.y1 == 1
-    assert observed.x2 == 644
-    assert observed.y2 == 642
-
-    got_exception = False
-    try:
-        _ = _quokka_normalize_extract(False)
-    except Exception as exc:
-        assert "Expected 'square' or tuple" in str(exc)
-        got_exception = True
-    assert got_exception
-
-
-def test__compute_resized_shape():
-    # tuple of ints
-    from_shape = (10, 15, 3)
-    to_shape = (20, 30)
-    observed = _compute_resized_shape(from_shape, to_shape)
-    assert observed == (20, 30, 3)
-
-    from_shape = (10, 15, 3)
-    to_shape = (20, 30, 3)
-    observed = _compute_resized_shape(from_shape, to_shape)
-    assert observed == (20, 30, 3)
-
-    # tuple of floats
-    from_shape = (10, 15, 3)
-    to_shape = (2.0, 3.0)
-    observed = _compute_resized_shape(from_shape, to_shape)
-    assert observed == (20, 45, 3)
-
-    # tuple of int and float
-    from_shape = (10, 15, 3)
-    to_shape = (2.0, 25)
-    observed = _compute_resized_shape(from_shape, to_shape)
-    assert observed == (20, 25, 3)
-
-    from_shape = (10, 17, 3)
-    to_shape = (15, 2.0)
-    observed = _compute_resized_shape(from_shape, to_shape)
-    assert observed == (15, 34, 3)
-
-    # None
-    from_shape = (10, 10, 3)
-    to_shape = None
-    observed = _compute_resized_shape(from_shape, to_shape)
-    assert observed == from_shape
-
-    # tuple containing None
-    from_shape = (10, 15, 3)
-    to_shape = (2.0, None)
-    observed = _compute_resized_shape(from_shape, to_shape)
-    assert observed == (20, 15, 3)
-
-    from_shape = (10, 15, 3)
-    to_shape = (None, 25)
-    observed = _compute_resized_shape(from_shape, to_shape)
-    assert observed == (10, 25, 3)
-
-    # single int
-    from_shape = (10, 15, 3)
-    to_shape = 20
-    observed = _compute_resized_shape(from_shape, to_shape)
-    assert observed == (20, 20, 3)
-
-    # single float
-    from_shape = (10, 15, 3)
-    to_shape = 2.0
-    observed = _compute_resized_shape(from_shape, to_shape)
-    assert observed == (20, 30, 3)
-
-    # from/to shape as arrays
-    from_shape = (10, 10, 3)
-    to_shape = (20, 30, 3)
-    observed = _compute_resized_shape(np.zeros(from_shape), np.zeros(to_shape))
-    assert observed == to_shape
-
-    # from_shape is 2D
-    from_shape = (10, 15)
-    to_shape = (20, 30)
-    observed = _compute_resized_shape(from_shape, to_shape)
-    assert observed == to_shape
-
-    from_shape = (10, 15)
-    to_shape = (20, 30, 3)
-    observed = _compute_resized_shape(from_shape, to_shape)
-    assert observed == (20, 30, 3)
-
-
-def test_quokka():
-    # we are intentionally a bit looser here with atol=0.1, because apparently
-    # on some systems there are small differences in what exactly is loaded,
-    # see issue #414
-
-    img = ia.quokka()
-    assert img.shape == (643, 960, 3)
-    assert np.allclose(
-        np.average(img, axis=(0, 1)),
-        [107.93576659, 118.18765066, 122.99378564],
-        rtol=0, atol=0.1
-    )
-
-    img = ia.quokka(extract="square")
-    assert img.shape == (643, 643, 3)
-    assert np.allclose(
-        np.average(img, axis=(0, 1)),
-        [111.25929196, 121.19431175, 125.71316898],
-        rtol=0, atol=0.1
-    )
-
-    img = ia.quokka(size=(642, 959))
-    assert img.shape == (642, 959, 3)
-    assert np.allclose(
-        np.average(img, axis=(0, 1)),
-        [107.84615822, 118.09832412, 122.90446467],
-        rtol=0, atol=0.1
-    )
-
-
-def test_quokka_square():
-    # we are intentionally a bit looser here with atol=0.1, because apparently
-    # on some systems there are small differences in what exactly is loaded,
-    # see issue #414
-
-    img = ia.quokka_square()
-    assert img.shape == (643, 643, 3)
-    assert np.allclose(
-        np.average(img, axis=(0, 1)),
-        [111.25929196, 121.19431175, 125.71316898],
-        rtol=0, atol=0.1
-    )
-
-
-def test_quokka_heatmap():
-    # we are intentionally a bit looser here with atol=0.1, because apparently
-    # on some systems there are small differences in what exactly is loaded,
-    # see issue #414
-
-    hm = ia.quokka_heatmap()
-    assert hm.shape == (643, 960, 3)
-    assert hm.arr_0to1.shape == (643, 960, 1)
-    assert np.allclose(np.average(hm.arr_0to1), 0.57618505, rtol=0, atol=1e-3)
-
-    hm = ia.quokka_heatmap(extract="square")
-    assert hm.shape == (643, 643, 3)
-    assert hm.arr_0to1.shape == (643, 643, 1)
-    # TODO this value is 0.48026073 in python 2.7, while 0.48026952 in 3.7 -- why?
-    assert np.allclose(np.average(hm.arr_0to1), 0.48026952, rtol=0, atol=1e-3)
-
-    hm = ia.quokka_heatmap(size=(642, 959))
-    assert hm.shape == (642, 959, 3)
-    assert hm.arr_0to1.shape == (642, 959, 1)
-    assert np.allclose(np.average(hm.arr_0to1), 0.5762454, rtol=0, atol=1e-3)
-
-
-def test_quokka_segmentation_map():
-    segmap = ia.quokka_segmentation_map()
-    assert segmap.shape == (643, 960, 3)
-    assert segmap.arr.shape == (643, 960, 1)
-    assert np.allclose(np.average(segmap.arr), 0.3016427, rtol=0, atol=1e-3)
-
-    segmap = ia.quokka_segmentation_map(extract="square")
-    assert segmap.shape == (643, 643, 3)
-    assert segmap.arr.shape == (643, 643, 1)
-    assert np.allclose(np.average(segmap.arr), 0.450353, rtol=0, atol=1e-3)
-
-    segmap = ia.quokka_segmentation_map(size=(642, 959))
-    assert segmap.shape == (642, 959, 3)
-    assert segmap.arr.shape == (642, 959, 1)
-    assert np.allclose(np.average(segmap.arr), 0.30160266, rtol=0, atol=1e-3)
-
-
-def test_quokka_keypoints():
-    kpsoi = ia.quokka_keypoints()
-    assert len(kpsoi.keypoints) > 0
-    assert np.allclose(kpsoi.keypoints[0].x, 163.0)
-    assert np.allclose(kpsoi.keypoints[0].y, 78.0)
-    assert kpsoi.shape == (643, 960, 3)
-
-    img = ia.quokka()
-    patches = []
-    for kp in kpsoi.keypoints:
-        bb = ia.BoundingBox(x1=kp.x-1, x2=kp.x+2, y1=kp.y-1, y2=kp.y+2)
-        patches.append(bb.extract_from_image(img))
-
-    img_square = ia.quokka(extract="square")
-    kpsoi_square = ia.quokka_keypoints(extract="square")
-    assert len(kpsoi.keypoints) == len(kpsoi_square.keypoints)
-    assert kpsoi_square.shape == (643, 643, 3)
-
-    for kp, patch in zip(kpsoi_square.keypoints, patches):
-        bb = ia.BoundingBox(x1=kp.x-1, x2=kp.x+2, y1=kp.y-1, y2=kp.y+2)
-        patch_square = bb.extract_from_image(img_square)
-        assert np.average(np.abs(patch.astype(np.float32) - patch_square.astype(np.float32))) < 1.0
-
-    kpsoi_resized = ia.quokka_keypoints(size=(642, 959))
-    assert kpsoi_resized.shape == (642, 959, 3)
-    assert len(kpsoi.keypoints) == len(kpsoi_resized.keypoints)
-    for kp, kp_resized in zip(kpsoi.keypoints, kpsoi_resized.keypoints):
-        d = np.sqrt((kp.x - kp_resized.x) ** 2 + (kp.y - kp_resized.y) ** 2)
-        assert d < 1.0
-
-
-def test_quokka_bounding_boxes():
-    bbsoi = ia.quokka_bounding_boxes()
-    assert len(bbsoi.bounding_boxes) > 0
-    bb0 = bbsoi.bounding_boxes[0]
-    assert np.allclose(bb0.x1, 148.0)
-    assert np.allclose(bb0.y1, 50.0)
-    assert np.allclose(bb0.x2, 550.0)
-    assert np.allclose(bb0.y2, 642.0)
-    assert bbsoi.shape == (643, 960, 3)
-
-    img = ia.quokka()
-    patches = []
-    for bb in bbsoi.bounding_boxes:
-        patches.append(bb.extract_from_image(img))
-
-    img_square = ia.quokka(extract="square")
-    bbsoi_square = ia.quokka_bounding_boxes(extract="square")
-    assert len(bbsoi.bounding_boxes) == len(bbsoi_square.bounding_boxes)
-    assert bbsoi_square.shape == (643, 643, 3)
-
-    for bb, patch in zip(bbsoi_square.bounding_boxes, patches):
-        patch_square = bb.extract_from_image(img_square)
-        assert np.average(np.abs(patch.astype(np.float32) - patch_square.astype(np.float32))) < 1.0
-
-    bbsoi_resized = ia.quokka_bounding_boxes(size=(642, 959))
-    assert bbsoi_resized.shape == (642, 959, 3)
-    assert len(bbsoi.bounding_boxes) == len(bbsoi_resized.bounding_boxes)
-    for bb, bb_resized in zip(bbsoi.bounding_boxes, bbsoi_resized.bounding_boxes):
-        d = np.sqrt((bb.center_x - bb_resized.center_x) ** 2 + (bb.center_y - bb_resized.center_y) ** 2)
-        assert d < 1.0
 
 
 def test_compute_line_intersection_point():
@@ -1019,7 +781,7 @@ def test_imresize_many_images():
         mask[1, :] = 255
         mask[2, :] = 255
         mask = ia.imresize_many_images([mask], (3, 3), interpolation=ip)[0]
-        mask = mask.astype(np.float128) / 255.0
+        mask = mask.astype(np.float64) / 255.0
 
         image = np.zeros((4, 4), dtype=bool)
         image[1, :] = True
@@ -1046,7 +808,7 @@ def test_imresize_many_images():
         mask[1, :] = 1.0
         mask[2, :] = 1.0
         mask = ia.imresize_many_images([mask], (3, 3), interpolation=ip)[0]
-        mask = mask.astype(np.float128)
+        mask = mask.astype(np.float64)
 
         for dtype in [np.float16, np.float32, np.float64]:
             isize = np.dtype(dtype).itemsize
@@ -1055,12 +817,12 @@ def test_imresize_many_images():
                 image = np.zeros((4, 4), dtype=dtype)
                 image[1, :] = value
                 image[2, :] = value
-                expected = (mask * np.float128(value)).astype(dtype)
+                expected = (mask * np.float64(value)).astype(dtype)
                 image_rs = ia.imresize_many_images([image], (3, 3), interpolation=ip)[0]
                 assert image_rs.dtype.type == dtype
                 # Our basis for the expected image is derived from uint8 as that is most likely to work, so we will
                 # have to accept here deviations of around 1/255.
-                atol = np.float128(1 / 255) * np.abs(np.float128(value)) + 1e-8
+                atol = np.float64(1 / 255) * np.abs(np.float64(value)) + 1e-8
                 assert np.allclose(image_rs, expected, rtol=0, atol=atol)
                 # Expect at least one cell to have a difference between observed and expected image of approx. 0,
                 # currently we seem to be able to get away with this despite the above mentioned inaccuracy.
@@ -1190,7 +952,16 @@ def test_pool():
     # -----
     # float
     # -----
-    for dtype in [np.float16, np.float32, np.float64, np.float128]:
+    try:
+        high_res_dt = np.float128
+        dtypes = ["float16", "float32", "float64", "float128"]
+    except AttributeError:
+        high_res_dt = np.float64
+        dtypes = ["float16", "float32", "float64"]
+
+    for dtype in dtypes:
+        dtype = np.dtype(dtype)
+
         def _allclose(a, b):
             atol = 1e-4 if dtype == np.float16 else 1e-8
             return np.allclose(a, b, atol=atol, rtol=0)
@@ -1236,13 +1007,13 @@ def test_pool():
                 y = np.array(arr_pooled, dtype=dt, copy=False, subok=True)
                 assert arr_pooled.shape == (2, 2)
                 assert arr_pooled.dtype == np.dtype(dtype)
-                assert _allclose(arr_pooled, np.float128(value))
+                assert _allclose(arr_pooled, high_res_dt(value))
 
                 arr = np.full((4, 4, 3), value, dtype=dtype)
                 arr_pooled = ia.pool(arr, 2, func)
                 assert arr_pooled.shape == (2, 2, 3)
                 assert arr_pooled.dtype == np.dtype(dtype)
-                assert _allclose(arr_pooled, np.float128(value))
+                assert _allclose(arr_pooled, high_res_dt(value))
 
     # ----
     # bool
@@ -1413,10 +1184,12 @@ def test_avg_pool():
     arr_pooled = ia.avg_pool(arr, 2)
     assert arr_pooled.shape == (2, 2)
     assert arr_pooled.dtype == arr.dtype.type
-    assert arr_pooled[0, 0] == int(np.average([0, 1, 4, 5]))
-    assert arr_pooled[0, 1] == int(np.average([2, 3, 6, 7]))
-    assert arr_pooled[1, 0] == int(np.average([8, 9, 12, 13]))
-    assert arr_pooled[1, 1] == int(np.average([10, 11, 14, 15]))
+    # add 1e-4 here to force 0.5 to be rounded up, as that's how OpenCV
+    # handles it
+    assert arr_pooled[0, 0] == int(np.round(1e-4 + np.average([0, 1, 4, 5])))
+    assert arr_pooled[0, 1] == int(np.round(1e-4 + np.average([2, 3, 6, 7])))
+    assert arr_pooled[1, 0] == int(np.round(1e-4 + np.average([8, 9, 12, 13])))
+    assert arr_pooled[1, 1] == int(np.round(1e-4 + np.average([10, 11, 14, 15])))
 
 
 # TODO add test that verifies the default padding mode
@@ -1478,6 +1251,115 @@ def test_median_pool():
     assert arr_pooled[0, 1] == int(np.median([2, 3, 6, 7]))
     assert arr_pooled[1, 0] == int(np.median([8, 9, 12, 13]))
     assert arr_pooled[1, 1] == int(np.median([10, 11, 14, 15]))
+
+
+# TODO add test that verifies the default padding mode
+def test_median_pool_ksize_1_3():
+    # very basic test, as median_pool() just calls pool(), which is tested in
+    # test_pool()
+    arr = np.uint8([
+        [0, 1, 2, 3],
+        [4, 5, 6, 7],
+        [8, 9, 10, 11],
+        [12, 13, 14, 15]
+    ])
+
+    arr_pooled = ia.median_pool(arr, (1, 3))
+
+    assert arr_pooled.shape == (4, 2)
+    assert arr_pooled.dtype == arr.dtype.type
+    assert arr_pooled[0, 0] == int(np.median([0, 1, 2]))
+    assert arr_pooled[0, 1] == int(np.median([3, 2, 1]))
+    assert arr_pooled[1, 0] == int(np.median([4, 5, 6]))
+    assert arr_pooled[1, 1] == int(np.median([7, 6, 5]))
+    assert arr_pooled[2, 0] == int(np.median([8, 9, 10]))
+    assert arr_pooled[2, 1] == int(np.median([11, 10, 9]))
+    assert arr_pooled[3, 0] == int(np.median([12, 13, 14]))
+    assert arr_pooled[3, 1] == int(np.median([15, 14, 13]))
+
+
+def test_median_pool_ksize_3():
+    # After padding:
+    # [5, 4, 5, 6, 7, 6],
+    # [1, 0, 1, 2, 3, 2],
+    # [5, 4, 5, 6, 7, 6],
+    # [9, 8, 9, 10, 11, 10],
+    # [13, 12, 13, 14, 15, 14],
+    # [9, 8, 9, 10, 11, 10]
+    arr = np.uint8([
+        [0, 1, 2, 3],
+        [4, 5, 6, 7],
+        [8, 9, 10, 11],
+        [12, 13, 14, 15]
+    ])
+
+    arr_pooled = ia.median_pool(arr, 3)
+
+    assert arr_pooled.shape == (2, 2)
+    assert arr_pooled.dtype == arr.dtype.type
+    assert arr_pooled[0, 0] == int(np.median([5, 4, 5, 1, 0, 1, 5, 4, 5]))
+    assert arr_pooled[0, 1] == int(np.median([6, 7, 6, 2, 3, 2, 6, 7, 6]))
+    assert arr_pooled[1, 0] == int(np.median([9, 8, 9, 13, 12, 13, 9, 8, 9]))
+    assert arr_pooled[1, 1] == int(np.median([10, 11, 10, 14, 15, 13, 10, 11,
+                                              10]))
+
+
+def test_median_pool_ksize_3_view():
+    # After padding:
+    # [5, 4, 5, 6, 7, 6],
+    # [1, 0, 1, 2, 3, 2],
+    # [5, 4, 5, 6, 7, 6],
+    # [9, 8, 9, 10, 11, 10],
+    # [13, 12, 13, 14, 15, 14],
+    # [9, 8, 9, 10, 11, 10]
+    arr = np.uint8([
+        [0, 1, 2, 3],
+        [4, 5, 6, 7],
+        [8, 9, 10, 11],
+        [12, 13, 14, 15],
+        [0, 0, 0, 0]
+    ])
+
+    arr_in = arr[0:4, :]
+    assert arr_in.flags["OWNDATA"] is False
+    assert arr_in.flags["C_CONTIGUOUS"] is True
+    arr_pooled = ia.median_pool(arr_in, 3)
+
+    assert arr_pooled.shape == (2, 2)
+    assert arr_pooled.dtype == arr.dtype.type
+    assert arr_pooled[0, 0] == int(np.median([5, 4, 5, 1, 0, 1, 5, 4, 5]))
+    assert arr_pooled[0, 1] == int(np.median([6, 7, 6, 2, 3, 2, 6, 7, 6]))
+    assert arr_pooled[1, 0] == int(np.median([9, 8, 9, 13, 12, 13, 9, 8, 9]))
+    assert arr_pooled[1, 1] == int(np.median([10, 11, 10, 14, 15, 13, 10, 11,
+                                              10]))
+
+
+def test_median_pool_ksize_3_non_contiguous():
+    # After padding:
+    # [5, 4, 5, 6, 7, 6],
+    # [1, 0, 1, 2, 3, 2],
+    # [5, 4, 5, 6, 7, 6],
+    # [9, 8, 9, 10, 11, 10],
+    # [13, 12, 13, 14, 15, 14],
+    # [9, 8, 9, 10, 11, 10]
+    arr = np.array([
+        [0, 1, 2, 3],
+        [4, 5, 6, 7],
+        [8, 9, 10, 11],
+        [12, 13, 14, 15]
+    ], dtype=np.uint8, order="F")
+
+    assert arr.flags["OWNDATA"] is True
+    assert arr.flags["C_CONTIGUOUS"] is False
+    arr_pooled = ia.median_pool(arr, 3)
+
+    assert arr_pooled.shape == (2, 2)
+    assert arr_pooled.dtype == arr.dtype.type
+    assert arr_pooled[0, 0] == int(np.median([5, 4, 5, 1, 0, 1, 5, 4, 5]))
+    assert arr_pooled[0, 1] == int(np.median([6, 7, 6, 2, 3, 2, 6, 7, 6]))
+    assert arr_pooled[1, 0] == int(np.median([9, 8, 9, 13, 12, 13, 9, 8, 9]))
+    assert arr_pooled[1, 1] == int(np.median([10, 11, 10, 14, 15, 13, 10, 11,
+                                              10]))
 
 
 def test_draw_grid():
@@ -1591,7 +1473,16 @@ def test_draw_grid():
         assert np.array_equal(grid, expected)
 
     # float
-    for dtype in [np.float16, np.float32, np.float64, np.float128]:
+    try:
+        _high_res_dt = np.float128
+        dtypes = ["float16", "float32", "float64", "float128"]
+    except AttributeError:
+        _high_res_dt = np.float64
+        dtypes = ["float16", "float32", "float64"]
+
+    for dtype in dtypes:
+        dtype = np.dtype(dtype)
+
         def _allclose(a, b):
             atol = 1e-4 if dtype == np.float16 else 1e-8
             return np.allclose(a, b, atol=atol, rtol=0)

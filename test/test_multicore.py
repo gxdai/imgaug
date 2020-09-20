@@ -75,14 +75,42 @@ class Test__get_context(unittest.TestCase):
 
     @unittest.skipUnless(IS_SUPPORTING_CONTEXTS,
                          "Behaviour is only supported in python 3.4+")
+    @mock.patch("platform.system")
     @mock.patch("multiprocessing.get_context")
     @mock.patch("platform.version")
-    def test_mocked_no_nixos_python3(self, mock_version, mock_gctx):
+    def test_mocked_no_nixos_python3(self, mock_version, mock_gctx, mock_system):
         with clean_context():
             mock_version.return_value = "Ubuntu"
+            mock_system.return_value = "Linux"
             _ctx = multicore._get_context()
             assert mock_gctx.call_count == 1
             assert mock_gctx.call_args_list[0][0][0] is None
+
+    @unittest.skipUnless(IS_SUPPORTING_CONTEXTS,
+                         "Behaviour is only supported in python 3.4+")
+    @mock.patch.object(sys, "version_info")
+    @mock.patch("platform.system")
+    @mock.patch("multiprocessing.get_context")
+    @mock.patch("platform.version")
+    def test_mocked_mac_and_37_cause_spawn(
+            self,
+            mock_version,
+            mock_gctx,
+            mock_system,
+            mock_vi
+    ):
+        with clean_context():
+            def version_info(index):
+                if isinstance(index, slice):
+                    return 3, 7
+                return 3 if index == 0 else 7
+
+            mock_vi.__getitem__.side_effect = version_info
+
+            mock_version.return_value = "foo"
+            mock_system.return_value = "Darwin"
+            _ctx = multicore._get_context()
+            mock_gctx.assert_called_once_with("spawn")
 
 
 class TestPool(unittest.TestCase):
@@ -215,8 +243,8 @@ class TestPool(unittest.TestCase):
             mock_Pool.map_async.return_value = "X"
             with mock.patch("multiprocessing.pool.Pool", mock_Pool):
                 batches = [
-                    clazz(images=[ia.quokka()]),
-                    clazz(images=[ia.quokka()+1])
+                    clazz(images=[ia.data.quokka()]),
+                    clazz(images=[ia.data.quokka()+1])
                 ]
                 with multicore.Pool(augseq, processes=1) as pool:
                     if call_async:
@@ -263,8 +291,8 @@ class TestPool(unittest.TestCase):
     @classmethod
     def _test_imap_batches_both(cls, call_unordered):
         for clazz in [Batch, UnnormalizedBatch]:
-            batches = [clazz(images=[ia.quokka()]),
-                       clazz(images=[ia.quokka()+1])]
+            batches = [clazz(images=[ia.data.quokka()]),
+                       clazz(images=[ia.data.quokka()+1])]
 
             def _generate_batches():
                 for batch in batches:
@@ -354,7 +382,7 @@ class TestPool(unittest.TestCase):
             result = [result] + list(gen)
             times = np.float64(times)
             times_diffs = times[1:] - times[0:-1]
-            assert np.all(times_diffs < timeout)
+            assert np.all(times_diffs < timeout * 1.01)
             assert contains_all_ids(result)
 
             # with output buffer limit, but set to the number of batches,
@@ -366,7 +394,7 @@ class TestPool(unittest.TestCase):
             result = [result] + list(gen)
             times = np.float64(times)
             times_diffs = times[1:] - times[0:-1]
-            assert np.all(times_diffs < timeout)
+            assert np.all(times_diffs < timeout * 1.01)
             assert contains_all_ids(result)
 
             # With output buffer limit of #batches/2 (=4), followed by a
@@ -385,9 +413,9 @@ class TestPool(unittest.TestCase):
             times_diffs = times[1:] - times[0:-1]
             # use -1 here because we have N-1 times for N batches as
             # diffs denote diffs between Nth and N+1th batch
-            assert np.all(times_diffs[0:4-1] < timeout)
-            assert np.all(times_diffs[4-1:4-1+1] >= timeout)
-            assert np.all(times_diffs[4-1+1:] < timeout)
+            assert np.all(times_diffs[0:4-1] < timeout * 1.01)
+            assert np.all(times_diffs[4-1:4-1+1] >= timeout * 0.99)
+            assert np.all(times_diffs[4-1+1:] < timeout * 1.01)
             assert contains_all_ids(result)
 
     def test_imap_batches(self):
@@ -417,15 +445,17 @@ class TestPool(unittest.TestCase):
                 sum_to_vecs[vecsum].append(vec)
 
     def test_augmentations_with_seed_match(self):
+        nb_batches = 60
         augseq = iaa.AddElementwise((0, 255))
         image = np.zeros((10, 10, 1), dtype=np.uint8)
         batch = ia.Batch(images=np.uint8([image, image]))
-        batches = [batch.deepcopy() for _ in sm.xrange(60)]
+        batches = [batch.deepcopy() for _ in sm.xrange(nb_batches)]
 
         # seed=1
         with multicore.Pool(augseq, processes=2, maxtasksperchild=30,
                             seed=1) as pool:
             batches_aug1 = pool.map_batches(batches, chunksize=2)
+
         # seed=1
         with multicore.Pool(augseq, processes=2, seed=1) as pool:
             batches_aug2 = pool.map_batches(batches, chunksize=1)
@@ -433,9 +463,9 @@ class TestPool(unittest.TestCase):
         with multicore.Pool(augseq, processes=2, seed=2) as pool:
             batches_aug3 = pool.map_batches(batches, chunksize=1)
 
-        assert len(batches_aug1) == 60
-        assert len(batches_aug2) == 60
-        assert len(batches_aug3) == 60
+        assert len(batches_aug1) == nb_batches
+        assert len(batches_aug2) == nb_batches
+        assert len(batches_aug3) == nb_batches
 
         for b1, b2, b3 in zip(batches_aug1, batches_aug2, batches_aug3):
             # images were augmented

@@ -28,11 +28,11 @@ def test_determinism():
     reseed()
 
     images = [
-        ia.quokka(size=(128, 128)),
-        ia.quokka(size=(64, 64)),
-        ia.imresize_single_image(skimage.data.astronaut(), (128, 256))
+        ia.data.quokka(size=(128, 128)),
+        ia.data.quokka(size=(64, 64)),
+        ia.data.quokka((128, 256))
     ]
-    images.extend([ia.quokka(size=(16, 16))] * 20)
+    images.extend([ia.data.quokka(size=(16, 16))] * 20)
 
     keypoints = [
         ia.KeypointsOnImage([
@@ -73,7 +73,7 @@ def test_determinism():
                    rotate=(-20, 20), shear=(-20, 20), order=ia.ALL,
                    mode=ia.ALL, cval=(0, 255)),
         iaa.PiecewiseAffine(scale=(0.1, 0.3)),
-        iaa.ElasticTransformation(alpha=0.5)
+        iaa.ElasticTransformation(alpha=10.0)
     ]
 
     augs_affect_geometry = [
@@ -414,17 +414,17 @@ def test_dtype_preservation():
          _not_dts([np.uint32, np.int32, np.float64])),
         (iaa.Identity(name="Identity"), default_dtypes),
         (iaa.BlendAlpha((0.0, 0.1), iaa.Identity(), name="BlendAlphaIdentity"),
-         default_dtypes),
+         _not_dts([np.float64])),  # float64 requires float128 support
         (iaa.BlendAlphaElementwise((0.0, 0.1), iaa.Identity(),
                                    name="BlendAlphaElementwiseIdentity"),
-         default_dtypes),
+         _not_dts([np.float64])),  # float64 requires float128 support
         (iaa.BlendAlphaSimplexNoise(iaa.Identity(),
                                     name="BlendAlphaSimplexNoiseIdentity"),
-         default_dtypes),
+         _not_dts([np.float64])),  # float64 requires float128 support
         (iaa.BlendAlphaFrequencyNoise(exponent=(-2, 2),
                                       foreground=iaa.Identity(),
                                       name="BlendAlphaFrequencyNoiseIdentity"),
-         default_dtypes),
+         _not_dts([np.float64])),
         (iaa.BlendAlpha((0.0, 0.1), iaa.Add(10), name="BlendAlpha"),
          _not_dts([np.uint32, np.int32, np.float64])),
         (iaa.BlendAlphaElementwise((0.0, 0.1), iaa.Add(10),

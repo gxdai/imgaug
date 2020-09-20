@@ -615,7 +615,6 @@ class Polygon(object):
             assert multipoly_inter_shapely.is_empty
             return []
         else:
-            print(multipoly_inter_shapely, image, self.exterior)
             raise Exception(
                 "Got an unexpected result of type %s from Shapely for "
                 "image (%d, %d) and polygon %s. This is an internal error. "
@@ -2248,7 +2247,7 @@ class _ConcavePolygonRecoverer(object):
         if polygon.is_valid:
             return polygon
 
-        random_state = iarandom.RNG(random_state)
+        random_state = iarandom.RNG.create_if_not_rng_(random_state)
         rss = random_state.duplicate(3)
 
         # remove consecutive duplicate points

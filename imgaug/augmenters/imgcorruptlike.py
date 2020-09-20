@@ -71,9 +71,12 @@ from __future__ import print_function, division, absolute_import
 
 import warnings
 
+import six.moves as sm
 import numpy as np
+import skimage.filters
 
 import imgaug as ia
+from ..imgaug import _numbajit
 from .. import dtypes as iadt
 from .. import random as iarandom
 from .. import parameters as iap
@@ -159,15 +162,7 @@ def _call_imgcorrupt_func(fname, seed, convert_to_pil, *args, **kwargs):
 
     image = args[0]
 
-    iadt.gate_dtypes(
-        image,
-        allowed=["uint8"],
-        disallowed=["bool",
-                    "uint16", "uint32", "uint64", "uint128", "uint256",
-                    "int8", "int16", "int32", "int64", "int128", "int256",
-                    "float16", "float32", "float64", "float96", "float128",
-                    "float256"],
-        augmenter=None)
+    iadt.allow_only_uint8({image.dtype})
 
     input_shape = image.shape
 
@@ -467,8 +462,6 @@ def _apply_glass_blur_imgaug(x, severity=1):
     # original function implementation from
     # https://github.com/bethgelab/imagecorruptions/blob/master/imagecorruptions/corruptions.py
     # this is an improved (i.e. faster) version
-    from skimage.filters import gaussian
-
     # sigma, max_delta, iterations
     c = [
         (0.7, 1, 2),
@@ -480,42 +473,55 @@ def _apply_glass_blur_imgaug(x, severity=1):
 
     sigma, max_delta, iterations = c
 
-    x = np.uint8(
-        gaussian(np.array(x) / 255., sigma=sigma, multichannel=True) * 255)
-    x_shape = np.array(x).shape
+    x = (
+        skimage.filters.gaussian(
+            np.array(x) / 255., sigma=sigma, multichannel=True
+        ) * 255
+    ).astype(np.uint)
+    x_shape = x.shape
 
-    # locally shuffle pixels
+    dxxdyy = np.random.randint(
+        -max_delta,
+        max_delta,
+        size=(
+            iterations,
+            x_shape[0] - 2*max_delta,
+            x_shape[1] - 2*max_delta,
+            2
+        )
+    )
+
+    x = _apply_glass_blur_imgaug_loop(
+        x, iterations, max_delta, dxxdyy
+    )
+
+    return np.clip(
+        skimage.filters.gaussian(x / 255., sigma=sigma, multichannel=True),
+        0, 1
+    ) * 255
+
+
+# Added in 0.5.0.
+@_numbajit(nopython=True, nogil=True, cache=True)
+def _apply_glass_blur_imgaug_loop(
+        x, iterations, max_delta, dxxdyy
+):
+    x_shape = x.shape
     nb_height = x_shape[0] - 2 * max_delta
     nb_width = x_shape[1] - 2 * max_delta
 
-    for _ in range(iterations):
-        dxxdyy = np.random.randint(-max_delta, max_delta,
-                                   size=(nb_height, nb_width, 2,))
-        dxxdyy = dxxdyy.astype(np.int16)
-        # Rotate here, because imagecorruptions starts the replacement at the
-        # bottom right, so the first generated sample should be placed in that
-        # corner and not the top left corner.
-        # We could avoid this with some fancy (but unreadable) indexing.
-        dxxdyy = np.rot90(dxxdyy, 2, axes=(1, 0))
-
-        # Pad the array to make things easier for us.
-        # We could avoid this with a bit better indexing.
-        dxxdyy = np.pad(
-            dxxdyy,
-            ((max_delta+1, max_delta-1), (max_delta+1, max_delta-1), (0, 0)),
-            mode="constant")
-
-        for h in range(x_shape[0] - max_delta, max_delta, -1):
-            for w in range(x_shape[1] - max_delta, max_delta, -1):
-                dx, dy = dxxdyy[h, w, :]
+    # locally shuffle pixels
+    for i in sm.xrange(iterations):
+        for j in sm.xrange(nb_height):
+            for k in sm.xrange(nb_width):
+                h = x_shape[0] - max_delta - j
+                w = x_shape[1] - max_delta - k
+                dx, dy = dxxdyy[i, j, k]
                 h_prime, w_prime = h + dy, w + dx
                 # swap
                 x[h, w], x[h_prime, w_prime] = x[h_prime, w_prime], x[h, w]
 
-    return np.clip(
-        gaussian(x / 255., sigma=sigma, multichannel=True),
-        0, 1
-    ) * 255
+    return x
 
 
 def apply_defocus_blur(x, severity=1, seed=None):

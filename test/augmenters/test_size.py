@@ -25,9 +25,172 @@ from imgaug import random as iarandom
 import imgaug.augmenters.size as iaa_size
 from imgaug.testutils import (array_equal_lists, keypoints_equal, reseed,
                               assert_cbaois_equal,
-                              runtest_pickleable_uint8_img)
+                              runtest_pickleable_uint8_img,
+                              is_parameter_instance,
+                              remove_prefetching)
 from imgaug.augmentables.heatmaps import HeatmapsOnImage
 from imgaug.augmentables.segmaps import SegmentationMapsOnImage
+from imgaug.augmenters.size import _prevent_zero_sizes_after_crops_
+
+
+class Test__prevent_zero_sizes_after_crops_(unittest.TestCase):
+    def test_single_item_arrays_without_crops(self):
+        # axis_sizes, crops_start, crops_end
+        axis_si = np.array([10], dtype=np.int32)
+        crops_s = np.array([0], dtype=np.int32)
+        crops_e = np.array([0], dtype=np.int32)
+
+        cs, ce = _prevent_zero_sizes_after_crops_(
+            axis_si, np.copy(crops_s), np.copy(crops_e)
+        )
+
+        assert np.all(cs == 0)
+        assert np.all(ce == 0)
+
+    def test_single_item_arrays_with_crops_in_bounds(self):
+        # axis_sizes, crops_start, crops_end
+        axis_si = np.array([10], dtype=np.int32)
+        crops_s = np.array([1], dtype=np.int32)
+        crops_e = np.array([2], dtype=np.int32)
+
+        cs, ce = _prevent_zero_sizes_after_crops_(
+            axis_si, np.copy(crops_s), np.copy(crops_e)
+        )
+
+        assert np.all(cs == 1)
+        assert np.all(ce == 2)
+
+    def test_single_item_arrays_with_crops_out_of_bounds(self):
+        # axis_sizes, crops_start, crops_end
+        axis_si = np.array([10], dtype=np.int32)
+        crops_s = np.array([5], dtype=np.int32)
+        crops_e = np.array([20], dtype=np.int32)
+
+        cs, ce = _prevent_zero_sizes_after_crops_(
+            axis_si, np.copy(crops_s), np.copy(crops_e)
+        )
+
+        assert np.all(cs == 0)
+        assert np.all(ce == 9)
+
+    def test_all_crops_zero(self):
+        # axis_sizes, crops_start, crops_end
+        axis_si = np.array([10, 11, 12, 13], dtype=np.int32)
+        crops_s = np.array([0, 0, 0, 0], dtype=np.int32)
+        crops_e = np.array([0, 0, 0, 0], dtype=np.int32)
+
+        cs, ce = _prevent_zero_sizes_after_crops_(
+            axis_si, np.copy(crops_s), np.copy(crops_e)
+        )
+
+        assert np.all(cs == 0)
+        assert np.all(ce == 0)
+
+    def test_all_crops_above_zero_but_none_reaches_zero_size(self):
+        # axis_sizes, crops_start, crops_end
+        axis_si = np.array([10, 11, 12, 13], dtype=np.int32)
+        crops_s = np.array([1, 2, 3, 4], dtype=np.int32)
+        crops_e = np.array([5, 6, 7, 8], dtype=np.int32)
+
+        cs, ce = _prevent_zero_sizes_after_crops_(
+            axis_si, np.copy(crops_s), np.copy(crops_e)
+        )
+
+        assert np.array_equal(cs, crops_s)
+        assert np.array_equal(ce, crops_e)
+
+    def test_some_axes_reach_zero_size(self):
+        axis_si = np.array([10, 11, 12, 13, 14], dtype=np.int32)
+        crops_s = np.array([1, 0, 13, 10, 7], dtype=np.int32)
+        crops_e = np.array([5, 12, 0, 10, 7], dtype=np.int32)
+
+        cs, ce = _prevent_zero_sizes_after_crops_(
+            axis_si, np.copy(crops_s), np.copy(crops_e)
+        )
+
+        assert np.array_equal(cs, [1, 0, 11, 6, 6])
+        assert np.array_equal(ce, [5, 10, 0, 6, 7])
+
+    def test_axis_sizes_of_1(self):
+        # axis_sizes, crops_start, crops_end
+        axis_si = np.array([9, 1, 1, 1, 1, 1, 1, 1], dtype=np.int32)
+        crops_s = np.array([1, 0, 1, 0, 1, 2, 0, 2], dtype=np.int32)
+        crops_e = np.array([5, 0, 0, 1, 1, 0, 2, 2], dtype=np.int32)
+
+        cs, ce = _prevent_zero_sizes_after_crops_(
+            axis_si, np.copy(crops_s), np.copy(crops_e)
+        )
+
+        assert np.array_equal(cs, [1, 0, 0, 0, 0, 0, 0, 0])
+        assert np.array_equal(ce, [5, 0, 0, 0, 0, 0, 0, 0])
+
+    def test_axis_sizes_of_0(self):
+        # axis_sizes, crops_start, crops_end
+        axis_si = np.array([9, 0, 0, 0, 0, 0, 0, 0], dtype=np.int32)
+        crops_s = np.array([1, 0, 1, 0, 1, 2, 0, 2], dtype=np.int32)
+        crops_e = np.array([5, 0, 0, 1, 1, 0, 2, 2], dtype=np.int32)
+
+        cs, ce = _prevent_zero_sizes_after_crops_(
+            axis_si, np.copy(crops_s), np.copy(crops_e)
+        )
+
+        assert np.array_equal(cs, [1, 0, 0, 0, 0, 0, 0, 0])
+        assert np.array_equal(ce, [5, 0, 0, 0, 0, 0, 0, 0])
+
+    def test_with_random_values(self):
+        batch_size = 256
+        for seed in np.arange(100):
+            with self.subTest(seed=seed):
+                rs = iarandom.RNG(seed)
+                axis_sizes = rs.integers(0, 100, size=(batch_size,))
+                crops_start = rs.integers(0, 100, size=(batch_size,))
+                crops_end = rs.integers(0, 100, size=(batch_size,))
+
+                cs, ce = _prevent_zero_sizes_after_crops_(
+                    axis_sizes, np.copy(crops_start), np.copy(crops_end)
+                )
+
+                expected_start = np.zeros((batch_size,), dtype=np.int32)
+                expected_end = np.zeros((batch_size,), dtype=np.int32)
+                gen = enumerate(zip(axis_sizes, crops_start, crops_end))
+                for i, (axs, csi, cei) in gen:
+                    if axs in [0, 1]:
+                        csi = 0
+                        cei = 0
+                    else:
+                        regain = abs(min(axs - csi - cei - 1, 0))
+                        while regain > 0:
+                            csi = csi - np.ceil(regain / 2)
+                            cei = cei - np.floor(regain / 2)
+
+                            if csi < 0:
+                                cei = cei - abs(csi)
+                                csi = 0
+                            if cei < 0:
+                                csi = csi - abs(cei)
+                                cei = 0
+
+                            regain = abs(min(axs - csi - cei, 0))
+                    expected_start[i] = csi
+                    expected_end[i] = cei
+
+                assert np.array_equal(cs, expected_start)
+                assert np.array_equal(ce, expected_end)
+                mask_zeros = (axis_sizes == 0)
+                if np.any(mask_zeros):
+                    assert np.all(
+                        axis_sizes[mask_zeros]
+                        - cs[mask_zeros]
+                        - ce[mask_zeros]
+                        == 0
+                    )
+                if np.any(~mask_zeros):
+                    assert np.all(
+                        axis_sizes[~mask_zeros]
+                        - cs[~mask_zeros]
+                        - ce[~mask_zeros]
+                        >= 1
+                    )
 
 
 class Test__handle_position_parameter(unittest.TestCase):
@@ -39,18 +202,19 @@ class Test__handle_position_parameter(unittest.TestCase):
         assert isinstance(observed, tuple)
         assert len(observed) == 2
         for i in range(2):
-            assert isinstance(observed[i], iap.Uniform)
-            assert isinstance(observed[i].a, iap.Deterministic)
-            assert isinstance(observed[i].b, iap.Deterministic)
-            assert 0.0 - 1e-4 < observed[i].a.value < 0.0 + 1e-4
-            assert 1.0 - 1e-4 < observed[i].b.value < 1.0 + 1e-4
+            param = remove_prefetching(observed[i])
+            assert is_parameter_instance(param, iap.Uniform)
+            assert is_parameter_instance(param.a, iap.Deterministic)
+            assert is_parameter_instance(param.b, iap.Deterministic)
+            assert 0.0 - 1e-4 < param.a.value < 0.0 + 1e-4
+            assert 1.0 - 1e-4 < param.b.value < 1.0 + 1e-4
 
     def test_string_center(self):
         observed = iaa_size._handle_position_parameter("center")
         assert isinstance(observed, tuple)
         assert len(observed) == 2
         for i in range(2):
-            assert isinstance(observed[i], iap.Deterministic)
+            assert is_parameter_instance(observed[i], iap.Deterministic)
             assert 0.5 - 1e-4 < observed[i].value < 0.5 + 1e-4
 
     def test_string_normal(self):
@@ -58,12 +222,15 @@ class Test__handle_position_parameter(unittest.TestCase):
         assert isinstance(observed, tuple)
         assert len(observed) == 2
         for i in range(2):
-            assert isinstance(observed[i], iap.Clip)
-            assert isinstance(observed[i].other_param, iap.Normal)
-            assert isinstance(observed[i].other_param.loc, iap.Deterministic)
-            assert isinstance(observed[i].other_param.scale, iap.Deterministic)
-            assert 0.5 - 1e-4 < observed[i].other_param.loc.value < 0.5 + 1e-4
-            assert 0.35/2 - 1e-4 < observed[i].other_param.scale.value < 0.35/2 + 1e-4
+            param = remove_prefetching(observed[i])
+            assert is_parameter_instance(param, iap.Clip)
+            assert is_parameter_instance(param.other_param, iap.Normal)
+            assert is_parameter_instance(param.other_param.loc,
+                                         iap.Deterministic)
+            assert is_parameter_instance(param.other_param.scale,
+                                         iap.Deterministic)
+            assert 0.5 - 1e-4 < param.other_param.loc.value < 0.5 + 1e-4
+            assert 0.35/2 - 1e-4 < param.other_param.scale.value < 0.35/2 + 1e-4
 
     def test_xy_axis_combined_strings(self):
         pos_x = [
@@ -81,22 +248,22 @@ class Test__handle_position_parameter(unittest.TestCase):
                 position = "%s-%s" % (x_str, y_str)
                 with self.subTest(position=position):
                     observed = iaa_size._handle_position_parameter(position)
-                    assert isinstance(observed[0], iap.Deterministic)
+                    assert is_parameter_instance(observed[0], iap.Deterministic)
                     assert x_val - 1e-4 < observed[0].value < x_val + 1e-4
-                    assert isinstance(observed[1], iap.Deterministic)
+                    assert is_parameter_instance(observed[1], iap.Deterministic)
                     assert y_val - 1e-4 < observed[1].value < y_val + 1e-4
 
     def test_stochastic_parameter(self):
         observed = iaa_size._handle_position_parameter(iap.Poisson(2))
-        assert isinstance(observed, iap.Poisson)
+        assert is_parameter_instance(observed, iap.Poisson)
 
     def test_tuple_of_floats(self):
         observed = iaa_size._handle_position_parameter((0.4, 0.6))
         assert isinstance(observed, tuple)
         assert len(observed) == 2
-        assert isinstance(observed[0], iap.Deterministic)
+        assert is_parameter_instance(observed[0], iap.Deterministic)
         assert 0.4 - 1e-4 < observed[0].value < 0.4 + 1e-4
-        assert isinstance(observed[1], iap.Deterministic)
+        assert is_parameter_instance(observed[1], iap.Deterministic)
         assert 0.6 - 1e-4 < observed[1].value < 0.6 + 1e-4
 
     def test_tuple_of_floats_outside_value_range_leads_to_failure(self):
@@ -111,21 +278,21 @@ class Test__handle_position_parameter(unittest.TestCase):
     def test_tuple_of_stochastic_parameters(self):
         observed = iaa_size._handle_position_parameter(
             (iap.Poisson(2), iap.Poisson(3)))
-        assert isinstance(observed[0], iap.Poisson)
-        assert isinstance(observed[0].lam, iap.Deterministic)
+        assert is_parameter_instance(observed[0], iap.Poisson)
+        assert is_parameter_instance(observed[0].lam, iap.Deterministic)
         assert 2 - 1e-4 < observed[0].lam.value < 2 + 1e-4
-        assert isinstance(observed[1], iap.Poisson)
-        assert isinstance(observed[1].lam, iap.Deterministic)
+        assert is_parameter_instance(observed[1], iap.Poisson)
+        assert is_parameter_instance(observed[1].lam, iap.Deterministic)
         assert 3 - 1e-4 < observed[1].lam.value < 3 + 1e-4
 
-    def test_tuple_of_float_and_stochastic_paramter(self):
+    def test_tuple_of_float_and_stochastic_parameter(self):
         observed = iaa_size._handle_position_parameter((0.4, iap.Poisson(3)))
         assert isinstance(observed, tuple)
         assert len(observed) == 2
-        assert isinstance(observed[0], iap.Deterministic)
+        assert is_parameter_instance(observed[0], iap.Deterministic)
         assert 0.4 - 1e-4 < observed[0].value < 0.4 + 1e-4
-        assert isinstance(observed[1], iap.Poisson)
-        assert isinstance(observed[1].lam, iap.Deterministic)
+        assert is_parameter_instance(observed[1], iap.Poisson)
+        assert is_parameter_instance(observed[1].lam, iap.Deterministic)
         assert 3 - 1e-4 < observed[1].lam.value < 3 + 1e-4
 
     def test_bad_datatype_leads_to_failure(self):
@@ -284,7 +451,15 @@ def test_pad():
     # -------
     # float
     # -------
-    for dtype in [np.float16, np.float32, np.float64, np.float128]:
+    dtypes = [np.float16, np.float32, np.float64]
+
+    try:
+        # without .type here the dtype(<list>) statements below fail
+        dtypes.append(np.dtype("float128").type)
+    except TypeError:
+        pass  # float128 not known by user system
+
+    for dtype in dtypes:
         arr = np.zeros((3, 3), dtype=dtype) + 1.0
 
         def _allclose(a, b):
@@ -500,54 +675,56 @@ def test_compute_paddings_for_aspect_ratio():
 
 def test_pad_to_aspect_ratio():
     for dtype in [np.uint8, np.int32, np.float32]:
+        dtype = np.dtype(dtype)
+
         # aspect_ratio = 1.0
         arr = np.zeros((4, 4), dtype=dtype)
         arr_pad = iaa.pad_to_aspect_ratio(arr, 1.0)
-        assert arr_pad.dtype.type == dtype
+        assert arr_pad.dtype.name == dtype.name
         assert arr_pad.shape[0] == 4
         assert arr_pad.shape[1] == 4
 
         arr = np.zeros((1, 4), dtype=dtype)
         arr_pad = iaa.pad_to_aspect_ratio(arr, 1.0)
-        assert arr_pad.dtype.type == dtype
+        assert arr_pad.dtype.name == dtype.name
         assert arr_pad.shape[0] == 4
         assert arr_pad.shape[1] == 4
 
         arr = np.zeros((4, 1), dtype=dtype)
         arr_pad = iaa.pad_to_aspect_ratio(arr, 1.0)
-        assert arr_pad.dtype.type == dtype
+        assert arr_pad.dtype.name == dtype.name
         assert arr_pad.shape[0] == 4
         assert arr_pad.shape[1] == 4
 
         arr = np.zeros((2, 4), dtype=dtype)
         arr_pad = iaa.pad_to_aspect_ratio(arr, 1.0)
-        assert arr_pad.dtype.type == dtype
+        assert arr_pad.dtype.name == dtype.name
         assert arr_pad.shape[0] == 4
         assert arr_pad.shape[1] == 4
 
         arr = np.zeros((4, 2), dtype=dtype)
         arr_pad = iaa.pad_to_aspect_ratio(arr, 1.0)
-        assert arr_pad.dtype.type == dtype
+        assert arr_pad.dtype.name == dtype.name
         assert arr_pad.shape[0] == 4
         assert arr_pad.shape[1] == 4
 
         # aspect_ratio != 1.0
         arr = np.zeros((4, 4), dtype=dtype)
         arr_pad = iaa.pad_to_aspect_ratio(arr, 2.0)
-        assert arr_pad.dtype.type == dtype
+        assert arr_pad.dtype.name == dtype.name
         assert arr_pad.shape[0] == 4
         assert arr_pad.shape[1] == 8
 
         arr = np.zeros((4, 4), dtype=dtype)
         arr_pad = iaa.pad_to_aspect_ratio(arr, 0.5)
-        assert arr_pad.dtype.type == dtype
+        assert arr_pad.dtype.name == dtype.name
         assert arr_pad.shape[0] == 8
         assert arr_pad.shape[1] == 4
 
         # 3d arr
         arr = np.zeros((4, 2, 3), dtype=dtype)
         arr_pad = iaa.pad_to_aspect_ratio(arr, 1.0)
-        assert arr_pad.dtype.type == dtype
+        assert arr_pad.dtype.name == dtype.name
         assert arr_pad.shape[0] == 4
         assert arr_pad.shape[1] == 4
         assert arr_pad.shape[2] == 3
@@ -1412,8 +1589,8 @@ class TestResize(unittest.TestCase):
     def test_get_parameters(self):
         aug = iaa.Resize(size=1, interpolation="nearest")
         params = aug.get_parameters()
-        assert isinstance(params[0], iap.Deterministic)
-        assert isinstance(params[1], iap.Deterministic)
+        assert is_parameter_instance(params[0], iap.Deterministic)
+        assert is_parameter_instance(params[1], iap.Deterministic)
         assert params[0].value == 1
         assert params[1].value == "nearest"
 
@@ -1522,7 +1699,7 @@ class TestPad(unittest.TestCase):
                       keep_size=False)
         expected = ["constant", "edge", "linear_ramp", "maximum", "mean",
                     "median", "minimum", "reflect", "symmetric", "wrap"]
-        assert isinstance(aug.pad_mode, iap.Choice)
+        assert is_parameter_instance(aug.pad_mode, iap.Choice)
         assert len(aug.pad_mode.a) == len(expected)
         assert np.all([v in aug.pad_mode.a for v in expected])
 
@@ -1532,7 +1709,7 @@ class TestPad(unittest.TestCase):
                       pad_cval=0,
                       keep_size=False)
         expected = ["constant", "maximum"]
-        assert isinstance(aug.pad_mode, iap.Choice)
+        assert is_parameter_instance(aug.pad_mode, iap.Choice)
         assert len(aug.pad_mode.a) == len(expected)
         assert np.all([v in aug.pad_mode.a for v in expected])
 
@@ -1542,7 +1719,7 @@ class TestPad(unittest.TestCase):
                       pad_cval=[50, 100],
                       keep_size=False)
         expected = [50, 100]
-        assert isinstance(aug.pad_cval, iap.Choice)
+        assert is_parameter_instance(aug.pad_cval, iap.Choice)
         assert len(aug.pad_cval.a) == len(expected)
         assert np.all([v in aug.pad_cval.a for v in expected])
 
@@ -2836,7 +3013,12 @@ class TestPad(unittest.TestCase):
         mask = np.zeros((4, 3), dtype=bool)
         mask[2, 1] = True
 
-        dtypes = ["float16", "float32", "float64", "float128"]
+        try:
+            high_res_dt = np.float128
+            dtypes = ["float16", "float32", "float64", "float128"]
+        except AttributeError:
+            high_res_dt = np.float64
+            dtypes = ["float16", "float32", "float64"]
 
         for dtype in dtypes:
             with self.subTest(dtype=dtype):
@@ -2860,7 +3042,7 @@ class TestPad(unittest.TestCase):
                     assert image_aug.shape == (4, 3)
                     assert np.all(_isclose(image_aug[~mask], 0))
                     assert np.all(_isclose(image_aug[mask],
-                                           np.float128(value)))
+                                           high_res_dt(value)))
 
     def test_pickleable(self):
         aug = iaa.Pad((0, 10), seed=1)
@@ -3949,7 +4131,12 @@ class TestCrop(unittest.TestCase):
         mask = np.zeros((2, 3), dtype=bool)
         mask[0, 1] = True
 
-        dtypes = ["float16", "float32", "float64", "float128"]
+        try:
+            high_res_dt = np.float128
+            dtypes = ["float16", "float32", "float64", "float128"]
+        except AttributeError:
+            high_res_dt = np.float64
+            dtypes = ["float16", "float32", "float64"]
 
         for dtype in dtypes:
             with self.subTest(dtype=dtype):
@@ -3973,7 +4160,7 @@ class TestCrop(unittest.TestCase):
                     assert image_aug.shape == (2, 3)
                     assert np.all(_isclose(image_aug[~mask], 0))
                     assert np.all(_isclose(image_aug[mask],
-                                           np.float128(value)))
+                                           high_res_dt(value)))
 
     def test_pickleable(self):
         aug = iaa.Crop((0, 10), seed=1)
@@ -4624,7 +4811,13 @@ class TestPadToFixedSize(unittest.TestCase):
 
     def test_other_dtypes_float(self):
         aug = iaa.PadToFixedSize(height=4, width=3, position="center-top")
-        dtypes = ["float16", "float32", "float64", "float128"]
+
+        try:
+            high_res_dt = np.float128
+            dtypes = ["float16", "float32", "float64", "float128"]
+        except AttributeError:
+            high_res_dt = np.float64
+            dtypes = ["float16", "float32", "float64"]
 
         mask = np.zeros((4, 3), dtype=bool)
         mask[2, 1] = True
@@ -4652,7 +4845,7 @@ class TestPadToFixedSize(unittest.TestCase):
                     assert image_aug.shape == (4, 3)
                     assert np.all(_isclose(image_aug[~mask], 0))
                     assert np.all(_isclose(image_aug[mask],
-                                           np.float128(value)))
+                                           high_res_dt(value)))
 
     def test_pickleable(self):
         aug = iaa.PadToFixedSize(20, 20, position="uniform", seed=1)
@@ -5266,7 +5459,12 @@ class TestCropToFixedSize(unittest.TestCase):
         mask = np.zeros((2, 3), dtype=bool)
         mask[0, 1] = True
 
-        dtypes = ["float16", "float32", "float64", "float128"]
+        try:
+            high_res_dt = np.float128
+            dtypes = ["float16", "float32", "float64", "float128"]
+        except AttributeError:
+            high_res_dt = np.float64
+            dtypes = ["float16", "float32", "float64"]
 
         for dtype in dtypes:
             min_value, center_value, max_value = \
@@ -5292,7 +5490,7 @@ class TestCropToFixedSize(unittest.TestCase):
                     assert image_aug.shape == (2, 3)
                     assert np.all(_isclose(image_aug[~mask], 0))
                     assert np.all(_isclose(image_aug[mask],
-                                           np.float128(value)))
+                                           high_res_dt(value)))
 
     def test_pickleable(self):
         aug = iaa.CropToFixedSize(10, 10, position="uniform", seed=1)

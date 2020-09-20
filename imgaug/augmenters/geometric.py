@@ -23,6 +23,7 @@ from __future__ import print_function, division, absolute_import
 
 import math
 import functools
+import itertools
 
 import numpy as np
 from scipy import ndimage
@@ -41,12 +42,12 @@ from .. import dtypes as iadt
 from .. import random as iarandom
 
 
-_VALID_DTYPES_CV2_ORDER_0 = {"uint8", "uint16", "int8", "int16", "int32",
-                             "float16", "float32", "float64",
-                             "bool"}
-_VALID_DTYPES_CV2_ORDER_NOT_0 = {"uint8", "uint16", "int8", "int16",
-                                 "float16", "float32", "float64",
-                                 "bool"}
+_WARP_AFF_VALID_DTYPES_CV2_ORDER_0 = iadt._convert_dtype_strs_to_types(
+    "uint8 uint16 int8 int16 int32 float16 float32 float64 bool"
+)  # Added in 0.5.0.
+_WARP_AFF_VALID_DTYPES_CV2_ORDER_NOT_0 = iadt._convert_dtype_strs_to_types(
+    "uint8 uint16 int8 int16 float16 float32 float64 bool"
+)  # Added in 0.5.0.
 
 # skimage | cv2
 # 0       | cv2.INTER_NEAREST
@@ -77,7 +78,11 @@ _AFFINE_MODE_SKIMAGE_TO_CV2 = {
     "wrap": cv2.BORDER_WRAP
 }
 
+_PI = 3.141592653589793
+_RAD_PER_DEGREE = _PI / 180
 
+
+@iap._prefetchable
 def _handle_order_arg(order, backend):
     # Peformance in skimage for Affine:
     #  1.0x order 0
@@ -122,58 +127,62 @@ def _handle_order_arg(order, backend):
         "StochasticParameter, got %s." % (type(order),))
 
 
+@iap._prefetchable
 def _handle_cval_arg(cval):
     if cval == ia.ALL:
         # TODO change this so that it is dynamically created per image
         #      (or once per dtype)
         return iap.Uniform(0, 255)  # skimage transform expects float
     return iap.handle_continuous_param(
-        cval, "cval", value_range=None, tuple_to_uniform=True,
-        list_to_choice=True)
+        cval,
+        "cval",
+        value_range=None,
+        tuple_to_uniform=True,
+        list_to_choice=True
+    )
 
 
 # currently used for Affine and PiecewiseAffine
 # TODO use iap.handle_categorical_string_param() here
+@iap._prefetchable_str
 def _handle_mode_arg(mode):
     if mode == ia.ALL:
-        return iap.Choice(["constant", "edge", "symmetric",
-                           "reflect", "wrap"])
+        return iap.Choice(["constant", "edge", "symmetric", "reflect", "wrap"])
     if ia.is_string(mode):
         return iap.Deterministic(mode)
     if isinstance(mode, list):
         assert all([ia.is_string(val) for val in mode]), (
             "Expected list of modes to only contain strings, got "
-            "types %s" % (", ".join([str(type(v)) for v in mode])))
+            "types %s" % (", ".join([str(type(v)) for v in mode]))
+        )
         return iap.Choice(mode)
     if isinstance(mode, iap.StochasticParameter):
         return mode
     raise Exception(
         "Expected mode to be imgaug.ALL, a string, a list of strings "
-        "or StochasticParameter, got %s." % (type(mode),))
+        "or StochasticParameter, got %s." % (type(mode),)
+    )
 
 
 def _warp_affine_arr(arr, matrix, order=1, mode="constant", cval=0,
                      output_shape=None, backend="auto"):
-    if ia.is_single_integer(cval):
-        cval = [cval] * len(arr.shape[2])
-
     # no changes to zero-sized arrays
     if arr.size == 0:
         return arr
+
+    if ia.is_single_integer(cval) or ia.is_single_float(cval):
+        cval = [cval] * len(arr.shape[2])
 
     min_value, _center_value, max_value = \
         iadt.get_value_range_of_dtype(arr.dtype)
 
     cv2_bad_order = order not in [0, 1, 3]
     if order == 0:
-        cv2_bad_dtype = (
-            arr.dtype.name
-            not in _VALID_DTYPES_CV2_ORDER_0)
+        cv2_bad_dtype = (arr.dtype
+                         not in _WARP_AFF_VALID_DTYPES_CV2_ORDER_0)
     else:
-        cv2_bad_dtype = (
-            arr.dtype.name
-            not in _VALID_DTYPES_CV2_ORDER_NOT_0
-        )
+        cv2_bad_dtype = (arr.dtype
+                         not in _WARP_AFF_VALID_DTYPES_CV2_ORDER_NOT_0)
     cv2_impossible = cv2_bad_order or cv2_bad_dtype
     use_skimage = (
         backend == "skimage"
@@ -200,10 +209,11 @@ def _warp_affine_arr(arr, matrix, order=1, mode="constant", cval=0,
             "cannot handle. Try using a different dtype or set "
             "order=0." % (
                 arr.dtype,))
+        cval_type = float if arr.dtype.kind == "f" else int
         image_warped = _warp_affine_arr_cv2(
             arr,
             matrix,
-            cval=tuple([int(v) for v in cval]),
+            cval=tuple([cval_type(v) for v in cval]),
             mode=mode,
             order=order,
             output_shape=output_shape
@@ -212,22 +222,24 @@ def _warp_affine_arr(arr, matrix, order=1, mode="constant", cval=0,
 
 
 def _warp_affine_arr_skimage(arr, matrix, cval, mode, order, output_shape):
-    iadt.gate_dtypes(
-        arr,
-        allowed=["bool",
-                 "uint8", "uint16", "uint32",
-                 "int8", "int16", "int32",
-                 "float16", "float32", "float64"],
-        disallowed=["uint64", "uint128", "uint256",
-                    "int64", "int128", "int256",
-                    "float96", "float128", "float256"],
-        augmenter=None)
+    iadt.gate_dtypes_strs(
+        {arr.dtype},
+        allowed="bool uint8 uint16 uint32 int8 int16 int32 "
+                "float16 float32 float64",
+        disallowed="uint64 int64 float128"
+    )
 
     input_dtype = arr.dtype
 
+    # tf.warp() produces a deprecation warning for bool images with
+    # order!=0. We either need to convert them to float or use NN
+    # interpolation.
+    if input_dtype == iadt._BOOL_DTYPE and order != 0:
+        arr = arr.astype(np.float32)
+
     image_warped = tf.warp(
         arr,
-        matrix.inverse,
+        np.linalg.inv(matrix),
         order=order,
         mode=mode,
         cval=cval,
@@ -236,7 +248,7 @@ def _warp_affine_arr_skimage(arr, matrix, cval, mode, order, output_shape):
     )
 
     # tf.warp changes all dtypes to float64, including uint8
-    if input_dtype == np.bool_:
+    if input_dtype.kind == "b":
         image_warped = image_warped > 0.5
     else:
         image_warped = iadt.restore_dtypes_(image_warped, input_dtype)
@@ -245,27 +257,22 @@ def _warp_affine_arr_skimage(arr, matrix, cval, mode, order, output_shape):
 
 
 def _warp_affine_arr_cv2(arr, matrix, cval, mode, order, output_shape):
-    iadt.gate_dtypes(
-        arr,
-        allowed=["bool",
-                 "uint8", "uint16",
-                 "int8", "int16", "int32",
-                 "float16", "float32", "float64"],
-        disallowed=["uint32", "uint64", "uint128", "uint256",
-                    "int64", "int128", "int256",
-                    "float96", "float128", "float256"],
-        augmenter=None)
+    iadt.gate_dtypes_strs(
+        {arr.dtype},
+        allowed="bool uint8 uint16 int8 int16 int32 float16 float32 float64",
+        disallowed="uint32 uint64 int64 float128"
+    )
 
     if order != 0:
-        assert arr.dtype.name != "int32", (
+        assert arr.dtype != iadt._INT32_DTYPE, (
             "Affine only supports cv2-based transformations of int32 "
             "arrays when using order=0, but order was set to %d." % (
                 order,))
 
     input_dtype = arr.dtype
-    if input_dtype in [np.bool_, np.float16]:
+    if input_dtype in {iadt._BOOL_DTYPE, iadt._FLOAT16_DTYPE}:
         arr = arr.astype(np.float32)
-    elif input_dtype == np.int8 and order != 0:
+    elif input_dtype == iadt._INT8_DTYPE and order != 0:
         arr = arr.astype(np.int16)
 
     dsize = (
@@ -286,7 +293,7 @@ def _warp_affine_arr_cv2(arr, matrix, cval, mode, order, output_shape):
         #      contain 3 values and not nb_channels values
         image_warped = cv2.warpAffine(
             _normalize_cv2_input_arr_(arr),
-            matrix.params[:2],
+            matrix[0:2, :],
             dsize=dsize,
             flags=order,
             borderMode=mode,
@@ -302,21 +309,44 @@ def _warp_affine_arr_cv2(arr, matrix, cval, mode, order, output_shape):
         image_warped = [
             cv2.warpAffine(
                 _normalize_cv2_input_arr_(arr[:, :, c]),
-                matrix.params[:2],
+                matrix[0:2, :],
                 dsize=dsize,
                 flags=order,
                 borderMode=mode,
                 borderValue=tuple([cval[0]])
             )
-            for c in sm.xrange(nb_channels)]
+            for c in sm.xrange(nb_channels)
+        ]
         image_warped = np.stack(image_warped, axis=-1)
 
-    if input_dtype.name == "bool":
+    if input_dtype.kind == "b":
         image_warped = image_warped > 0.5
-    elif input_dtype.name in ["int8", "float16"]:
+    elif input_dtype in {iadt._INT8_DTYPE, iadt._FLOAT16_DTYPE}:
         image_warped = iadt.restore_dtypes_(image_warped, input_dtype)
 
     return image_warped
+
+
+# Added in 0.5.0.
+def _warp_affine_coords(coords, matrix):
+    if len(coords) == 0:
+        return coords
+    assert coords.shape[1] == 2
+    assert matrix.shape == (3, 3)
+
+    # this is the same as in scikit-image, _geometric.py -> _apply_mat()
+    x, y = np.transpose(coords)
+    src = np.vstack((x, y, np.ones_like(x)))
+    dst = np.dot(src.T, matrix.T)
+
+    # below, we will divide by the last dimension of the homogeneous
+    # coordinate matrix. In order to avoid division by zero,
+    # we replace exact zeros in this column with a very small number.
+    dst[dst[:, 2] == 0, 2] = np.finfo(float).eps
+    # rescale to homogeneous coordinates
+    dst[:, :2] /= dst[:, 2:3]
+
+    return dst[:, :2]
 
 
 def _compute_affine_warp_output_shape(matrix, input_shape):
@@ -332,7 +362,7 @@ def _compute_affine_warp_output_shape(matrix, input_shape):
         [width - 1, height - 1],
         [width - 1, 0]
     ])
-    corners = matrix(corners)
+    corners = _warp_affine_coords(corners, matrix)
     minc = corners[:, 0].min()
     minr = corners[:, 1].min()
     maxc = corners[:, 0].max()
@@ -346,8 +376,9 @@ def _compute_affine_warp_output_shape(matrix, input_shape):
     output_shape = tuple([int(v) for v in output_shape.tolist()])
     # fit output image in new shape
     translation = (-minc, -minr)
-    matrix_to_fit = tf.SimilarityTransform(translation=translation)
-    matrix = matrix + matrix_to_fit
+    matrix = _AffineMatrixGenerator(matrix).translate(
+        x_px=translation[0], y_px=translation[1]
+    ).matrix
     return matrix, output_shape
 
 
@@ -542,7 +573,7 @@ def generate_jigsaw_destinations(nb_rows, nb_cols, max_steps, seed,
     """
     assert connectivity in (4, 8), (
         "Expected connectivity of 4 or 8, got %d." % (connectivity,))
-    random_state = iarandom.RNG(seed)
+    random_state = iarandom.RNG.create_if_not_rng_(seed)
     steps = random_state.integers(0, max_steps, size=(nb_rows, nb_cols),
                                   endpoint=True)
     directions = random_state.integers(0, connectivity,
@@ -582,6 +613,77 @@ def generate_jigsaw_destinations(nb_rows, nb_cols, max_steps, seed,
     return destinations
 
 
+# Added in 0.5.0.
+class _AffineMatrixGenerator(object):
+    # Added in 0.5.0.
+    def __init__(self, matrix=None):
+        if matrix is None:
+            matrix = np.eye(3, dtype=np.float32)
+        self.matrix = matrix
+
+    # Added in 0.5.0.
+    def centerize(self, image_shape):
+        height, width = image_shape[0:2]
+        self.translate(-width/2, -height/2)
+        return self
+
+    # Added in 0.5.0.
+    def invert_centerize(self, image_shape):
+        height, width = image_shape[0:2]
+        self.translate(width/2, height/2)
+        return self
+
+    # Added in 0.5.0.
+    def translate(self, x_px, y_px):
+        if x_px < 1e-4 or x_px > 1e-4 or y_px < 1e-4 or x_px > 1e-4:
+            matrix = np.array([
+                [1, 0, x_px],
+                [0, 1, y_px],
+                [0, 0, 1]
+            ], dtype=np.float32)
+            self._mul(matrix)
+        return self
+
+    # Added in 0.5.0.
+    def scale(self, x_frac, y_frac):
+        if (x_frac < 1.0-1e-4 or x_frac > 1.0+1e-4
+                or y_frac < 1.0-1e-4 or y_frac > 1.0+1e-4):
+            matrix = np.array([
+                [x_frac, 0, 0],
+                [0, y_frac, 0],
+                [0, 0, 1]
+            ], dtype=np.float32)
+            self._mul(matrix)
+        return self
+
+    # Added in 0.5.0.
+    def rotate(self, rad):
+        if rad < 1e-4 or rad > 1e-4:
+            rad = -rad
+            matrix = np.array([
+                [np.cos(rad), np.sin(rad), 0],
+                [-np.sin(rad), np.cos(rad), 0],
+                [0, 0, 1]
+            ], dtype=np.float32)
+            self._mul(matrix)
+        return self
+
+    # Added in 0.5.0.
+    def shear(self, x_rad, y_rad):
+        if x_rad < 1e-4 or x_rad > 1e-4 or y_rad < 1e-4 or y_rad > 1e-4:
+            matrix = np.array([
+                [1, np.tanh(-x_rad), 0],
+                [np.tanh(y_rad), 1, 0],
+                [0, 0, 1]
+            ], dtype=np.float32)
+            self._mul(matrix)
+        return self
+
+    # Added in 0.5.0.
+    def _mul(self, matrix):
+        self.matrix = np.matmul(matrix, self.matrix)
+
+
 class _AffineSamplingResult(object):
     def __init__(self, scale=None, translate=None, translate_mode="px",
                  rotate=None, shear=None, cval=None, mode=None, order=None):
@@ -602,21 +704,23 @@ class _AffineSamplingResult(object):
         translate_y = self.translate[1][idx]  # TODO same as above
         translate_x = self.translate[0][idx]
         assert self.translate_mode in ["px", "percent"], (
-            "Expected 'px' or 'percent', got '%s'." % (self.translate_mode,))
+            "Expected 'px' or 'percent', got '%s'." % (self.translate_mode,)
+        )
+
         if self.translate_mode == "percent":
             translate_y_px = translate_y * arr_shape[0]
-        else:
-            translate_y_px = (translate_y / image_shape[0]) * arr_shape[0]
-        if self.translate_mode == "percent":
             translate_x_px = translate_x * arr_shape[1]
         else:
+            translate_y_px = (translate_y / image_shape[0]) * arr_shape[0]
             translate_x_px = (translate_x / image_shape[1]) * arr_shape[1]
 
         rotate_deg = self.rotate[idx]
         shear_x_deg = self.shear[0][idx]
         shear_y_deg = self.shear[1][idx]
-        rotate_rad, shear_x_rad, shear_y_rad = np.deg2rad([
-            rotate_deg, shear_x_deg, shear_y_deg])
+
+        rotate_rad = rotate_deg * _RAD_PER_DEGREE
+        shear_x_rad = shear_x_deg * _RAD_PER_DEGREE
+        shear_y_rad = shear_y_deg * _RAD_PER_DEGREE
 
         # we add the _deg versions of rotate and shear here for PILAffine,
         # Affine itself only uses *_rad
@@ -633,43 +737,40 @@ class _AffineSamplingResult(object):
             "shear_x_deg": shear_x_deg
         }
 
-    def to_matrix(self, idx, arr_shape, image_shape, fit_output,
-                  shift_add=(0.5, 0.5)):
+    # for images we use additional shifts of (0.5, 0.5) as otherwise
+    # we get an ugly black border for 90deg rotations
+    def to_matrix(
+            self,
+            idx,
+            arr_shape,
+            image_shape,
+            fit_output,
+            shift_add=(0.5, 0.5)
+    ):
         if 0 in image_shape:
-            return tf.AffineTransform(), arr_shape
+            return np.eye(3, dtype=np.float32), arr_shape
 
-        height, width = arr_shape[0:2]
-
-        params = self.get_affine_parameters(idx,
-                                            arr_shape=arr_shape,
-                                            image_shape=image_shape)
-
-        # for images we use additional shifts of (0.5, 0.5) as otherwise
-        # we get an ugly black border for 90deg rotations
-        shift_y = height / 2.0 - shift_add[0]
-        shift_x = width / 2.0 - shift_add[1]
-
-        matrix_to_topleft = tf.SimilarityTransform(
-            translation=[-shift_x, -shift_y])
-        matrix_shear_y_rot = tf.AffineTransform(rotation=-3.141592/2)
-        matrix_shear_y = tf.AffineTransform(shear=params["shear_y_rad"])
-        matrix_shear_y_rot_inv = tf.AffineTransform(rotation=3.141592/2)
-        matrix_transforms = tf.AffineTransform(
-            scale=(params["scale_x"], params["scale_y"]),
-            translation=(params["translate_x_px"], params["translate_y_px"]),
-            rotation=params["rotate_rad"],
-            shear=params["shear_x_rad"]
+        params = self.get_affine_parameters(
+            idx, arr_shape=arr_shape, image_shape=image_shape
         )
-        matrix_to_center = tf.SimilarityTransform(
-            translation=[shift_x, shift_y])
-        matrix = (matrix_to_topleft
-                  + matrix_shear_y_rot
-                  + matrix_shear_y
-                  + matrix_shear_y_rot_inv
-                  + matrix_transforms
-                  + matrix_to_center)
+
+        matrix_gen = _AffineMatrixGenerator()
+        matrix_gen.centerize(arr_shape)
+        matrix_gen.translate(x_px=shift_add[1], y_px=shift_add[0])
+        matrix_gen.rotate(params["rotate_rad"])
+        matrix_gen.scale(x_frac=params["scale_x"], y_frac=params["scale_y"])
+        matrix_gen.shear(x_rad=params["shear_x_rad"],
+                         y_rad=params["shear_y_rad"])
+        matrix_gen.translate(x_px=params["translate_x_px"],
+                             y_px=params["translate_y_px"])
+        matrix_gen.translate(x_px=-shift_add[1], y_px=-shift_add[0])
+        matrix_gen.invert_centerize(arr_shape)
+
+        matrix = matrix_gen.matrix
         if fit_output:
-            return _compute_affine_warp_output_shape(matrix, arr_shape)
+            matrix, arr_shape = _compute_affine_warp_output_shape(
+                matrix, arr_shape
+            )
         return matrix, arr_shape
 
     # Added in 0.4.0.
@@ -691,12 +792,9 @@ class _AffineSamplingResult(object):
 
 
 def _is_identity_matrix(matrix, eps=1e-4):
-    identity = np.float32([
-        [1, 0, 0],
-        [0, 1, 0],
-        [0, 0, 1]
-    ])
-    return np.average(np.abs(identity - matrix.params)) <= eps
+    identity = np.eye(3, dtype=np.float32)
+    # about twice as fast as np.allclose()
+    return np.average(np.abs(matrix - identity)) <= eps
 
 
 class Affine(meta.Augmenter):
@@ -1357,7 +1455,7 @@ class Affine(meta.Augmenter):
 
                     if (not _is_identity_matrix(matrix)
                             and not cbaoi.empty
-                            and not 0 in cbaoi.shape[0:2]):
+                            and 0 not in cbaoi.shape[0:2]):
                         # TODO this is hacky
                         if augm_name == "bounding_boxes":
                             # Ensure that 4 points are used for bbs.
@@ -1365,15 +1463,13 @@ class Affine(meta.Augmenter):
                             # to_xy_array() does not.
                             kpsoi = cbaoi.to_keypoints_on_image()
                             coords = kpsoi.to_xy_array()
-                            coords_aug = tf.matrix_transform(coords,
-                                                             matrix.params)
+                            coords_aug = tf.matrix_transform(coords, matrix)
                             kpsoi = kpsoi.fill_from_xy_array_(coords_aug)
                             cbaoi = cbaoi.invert_to_keypoints_on_image_(
                                 kpsoi)
                         else:
                             coords = cbaoi.to_xy_array()
-                            coords_aug = tf.matrix_transform(coords,
-                                                             matrix.params)
+                            coords_aug = tf.matrix_transform(coords, matrix)
                             cbaoi = cbaoi.fill_from_xy_array_(coords_aug)
 
                     cbaoi.shape = output_shape
@@ -1384,37 +1480,39 @@ class Affine(meta.Augmenter):
     def _augment_images_by_samples(self, images, samples,
                                    image_shapes=None,
                                    return_matrices=False):
-        nb_images = len(images)
+        if image_shapes is None:
+            image_shapes = [image.shape for image in images]
+
         input_was_array = ia.is_np_array(images)
         input_dtype = None if not input_was_array else images.dtype
         result = []
-        if return_matrices:
-            matrices = [None] * nb_images
-        for i in sm.xrange(nb_images):
-            image = images[i]
+        matrices = []
+        gen = enumerate(
+            zip(
+                images, image_shapes, samples.cval, samples.mode, samples.order
+            )
+        )
+        for i, (image, image_shape, cval, mode, order) in gen:
+            matrix, output_shape = samples.to_matrix(
+                i, image.shape, image_shape, self.fit_output
+            )
 
-            image_shape = (image.shape if image_shapes is None
-                           else image_shapes[i])
-            matrix, output_shape = samples.to_matrix(i, image.shape,
-                                                     image_shape,
-                                                     self.fit_output)
-
-            cval = samples.cval[i]
-            mode = samples.mode[i]
-            order = samples.order[i]
-
+            image_warped = image
             if not _is_identity_matrix(matrix):
                 image_warped = _warp_affine_arr(
-                    image, matrix,
-                    order=order, mode=mode, cval=cval,
-                    output_shape=output_shape, backend=self.backend)
+                    image,
+                    matrix,
+                    order=order,
+                    mode=mode,
+                    cval=cval,
+                    output_shape=output_shape,
+                    backend=self.backend
+                )
 
-                result.append(image_warped)
-            else:
-                result.append(image)
+            result.append(image_warped)
 
             if return_matrices:
-                matrices[i] = matrix
+                matrices.append(matrix)
 
         # the shapes can change due to fit_output, then it may not be possible
         # to return an array, even when the input was an array
@@ -1425,7 +1523,6 @@ class Affine(meta.Augmenter):
 
         if return_matrices:
             result = (result, matrices)
-
         return result
 
     # Added in 0.4.0.
@@ -1466,7 +1563,8 @@ class Affine(meta.Augmenter):
             setattr(augmentable_i, arr_attr_name, arr_aug)
             if self.fit_output:
                 _, output_shape_i = _compute_affine_warp_output_shape(
-                    matrix, augmentable_i.shape)
+                    matrix, augmentable_i.shape
+                )
             else:
                 output_shape_i = augmentable_i.shape
             augmentable_i.shape = output_shape_i
@@ -1529,13 +1627,15 @@ class Affine(meta.Augmenter):
             shear=shear_samples,
             cval=cval_samples,
             mode=mode_samples,
-            order=order_samples)
+            order=order_samples
+        )
 
     def get_parameters(self):
         """See :func:`~imgaug.augmenters.meta.Augmenter.get_parameters`."""
         return [
             self.scale, self.translate, self.rotate, self.shear, self.order,
-            self.cval, self.mode, self.backend, self.fit_output]
+            self.cval, self.mode, self.backend, self.fit_output
+        ]
 
 
 class ScaleX(Affine):
@@ -2820,9 +2920,11 @@ class AffineCv2(meta.Augmenter):
                 (nb_samples,), random_state=rngs[5])
             translate_samples = (translate_samples, translate_samples)
 
-        valid_dts = ["int32", "int64", "float32", "float64"]
+        valid_dts = iadt._convert_dtype_strs_to_types(
+            "int32 int64 float32 float64"
+        )
         for i in sm.xrange(2):
-            assert translate_samples[i].dtype.name in valid_dts, (
+            assert translate_samples[i].dtype in valid_dts, (
                 "Expected translate_samples to have any dtype of %s. "
                 "Got %s." % (str(valid_dts), translate_samples[i].dtype.name,))
 
@@ -3082,16 +3184,13 @@ class PiecewiseAffine(meta.Augmenter):
 
     # Added in 0.4.0.
     def _augment_images_by_samples(self, images, samples):
-        iadt.gate_dtypes(
+        iadt.gate_dtypes_strs(
             images,
-            allowed=["bool",
-                     "uint8", "uint16", "uint32",
-                     "int8", "int16", "int32",
-                     "float16", "float32", "float64"],
-            disallowed=["uint64", "uint128", "uint256",
-                        "int64", "int128", "int256",
-                        "float96", "float128", "float256"],
-            augmenter=self)
+            allowed="bool uint8 uint16 uint32 int8 int16 int32 "
+                    "float16 float32 float64",
+            disallowed="uint64 int64 float128",
+            augmenter=self
+        )
 
         result = images
 
@@ -3588,6 +3687,7 @@ class PerspectiveTransform(meta.Augmenter):
     # TODO unify this somehow with the global _handle_mode_arg() that is
     #      currently used for Affine and PiecewiseAffine
     @classmethod
+    @iap._prefetchable_str
     def _handle_mode_arg(cls, mode):
         available_modes = [cv2.BORDER_REPLICATE, cv2.BORDER_CONSTANT]
         available_modes_str = ["replicate", "constant"]
@@ -3682,16 +3782,12 @@ class PerspectiveTransform(meta.Augmenter):
 
     # Added in 0.4.0.
     def _augment_images_by_samples(self, images, samples):
-        iadt.gate_dtypes(
+        iadt.gate_dtypes_strs(
             images,
-            allowed=["bool",
-                     "uint8", "uint16",
-                     "int8", "int16",
-                     "float16", "float32", "float64"],
-            disallowed=["uint32", "uint64", "uint128", "uint256",
-                        "int32", "int64", "int128", "int256",
-                        "float96", "float128", "float256"],
-            augmenter=self)
+            allowed="bool uint8 uint16 int8 int16 float16 float32 float64",
+            disallowed="uint32 uint64 int32 int64 float128",
+            augmenter=self
+        )
 
         result = images
         if not self.keep_size:
@@ -3702,9 +3798,10 @@ class PerspectiveTransform(meta.Augmenter):
 
         for i, (image, matrix, max_height, max_width, cval, mode) in gen:
             input_dtype = image.dtype
-            if input_dtype.name in ["int8"]:
+            if input_dtype == iadt._INT8_DTYPE:
                 image = image.astype(np.int16)
-            elif input_dtype.name in ["bool", "float16"]:
+            elif (input_dtype
+                  in {iadt._BOOL_DTYPE, iadt._FLOAT16_DTYPE}):
                 image = image.astype(np.float32)
 
             # cv2.warpPerspective only supports <=4 channels and errors
@@ -3743,9 +3840,9 @@ class PerspectiveTransform(meta.Augmenter):
                 h, w = image.shape[0:2]
                 warped = ia.imresize_single_image(warped, (h, w))
 
-            if input_dtype.name == "bool":
+            if input_dtype.kind == "b":
                 warped = warped > 0.5
-            elif warped.dtype.name != input_dtype.name:
+            elif warped.dtype != input_dtype:
                 warped = iadt.restore_dtypes_(warped, input_dtype)
 
             result[i] = warped
@@ -4016,16 +4113,6 @@ class PerspectiveTransform(meta.Augmenter):
                 self.fit_output]
 
 
-class _ElasticTransformationSamplingResult(object):
-    def __init__(self, random_states, alphas, sigmas, orders, cvals, modes):
-        self.random_states = random_states
-        self.alphas = alphas
-        self.sigmas = sigmas
-        self.orders = orders
-        self.cvals = cvals
-        self.modes = modes
-
-
 # TODO add independent sigmas for x/y
 # TODO add independent alphas for x/y
 # TODO add backend arg
@@ -4092,8 +4179,9 @@ class ElasticTransformation(meta.Augmenter):
     ----------
     alpha : number or tuple of number or list of number or imgaug.parameters.StochasticParameter, optional
         Strength of the distortion field. Higher values mean that pixels are
-        moved further with respect to the distortion field's direction. Set
-        this to around 10 times the value of `sigma` for visible effects.
+        moved further with respect to the distortion field's direction.
+        Should be a value from interval ``[1.0, inf]``. Set this to around
+        ``10 * sigma`` for visible effects.
 
             * If number, then that value will be used for all images.
             * If tuple ``(a, b)``, then a random value will be uniformly
@@ -4104,8 +4192,11 @@ class ElasticTransformation(meta.Augmenter):
               sample a value per image.
 
     sigma : number or tuple of number or list of number or imgaug.parameters.StochasticParameter, optional
-        Standard deviation of the gaussian kernel used to smooth the distortion
-        fields. Higher values (for ``128x128`` images around 5.0) lead to more
+        Corresponds to the standard deviation of the gaussian kernel used
+        in the original algorithm. Here, for performance reasons, it denotes
+        half of an average blur kernel size. (Only for ``sigma<1.5`` is
+        a gaussian kernel actually used.)
+        Higher values (for ``128x128`` images around 5.0) lead to more
         water-like effects, while lower values (for ``128x128`` images
         around ``1.0`` and lower) lead to more noisy, pixelated images. Set
         this to around 1/10th of `alpha` for visible effects.
@@ -4231,7 +4322,7 @@ class ElasticTransformation(meta.Augmenter):
         5: cv2.INTER_CUBIC
     }
 
-    def __init__(self, alpha=(0.0, 40.0), sigma=(4.0, 8.0), order=3, cval=0,
+    def __init__(self, alpha=(1.0, 40.0), sigma=(4.0, 8.0), order=0, cval=0,
                  mode="constant",
                  polygon_recoverer="auto",
                  seed=None, name=None,
@@ -4268,7 +4359,10 @@ class ElasticTransformation(meta.Augmenter):
         self._cval_heatmaps = 0.0
         self._cval_segmentation_maps = 0
 
+        self._last_meshgrid = None
+
     @classmethod
+    @iap._prefetchable
     def _handle_order_arg(cls, order):
         if order == ia.ALL:
             return iap.Choice([0, 1, 2, 3, 4, 5])
@@ -4277,6 +4371,7 @@ class ElasticTransformation(meta.Augmenter):
             list_to_choice=True, allow_floats=False)
 
     @classmethod
+    @iap._prefetchable_str
     def _handle_mode_arg(cls, mode):
         if mode == ia.ALL:
             return iap.Choice(["constant", "nearest", "reflect", "wrap"])
@@ -4302,33 +4397,27 @@ class ElasticTransformation(meta.Augmenter):
         cvals = self.cval.draw_samples((nb_images,), random_state=rss[-2])
         modes = self.mode.draw_samples((nb_images,), random_state=rss[-1])
         return _ElasticTransformationSamplingResult(
-            rss[0:-5], alphas, sigmas, orders, cvals, modes)
+            rss[0], alphas, sigmas, orders, cvals, modes)
 
     # Added in 0.4.0.
     def _augment_batch_(self, batch, random_state, parents, hooks):
         # pylint: disable=invalid-name
         if batch.images is not None:
-            iadt.gate_dtypes(
+            iadt.gate_dtypes_strs(
                 batch.images,
-                allowed=["bool",
-                         "uint8", "uint16", "uint32", "uint64",
-                         "int8", "int16", "int32", "int64",
-                         "float16", "float32", "float64"],
-                disallowed=["uint128", "uint256",
-                            "int128", "int256",
-                            "float96", "float128", "float256"],
-                augmenter=self)
+                allowed="bool uint8 uint16 uint32 uint64 int8 int16 int32 "
+                        "int64 float16 float32 float64",
+                disallowed="float128",
+                augmenter=self
+            )
 
         shapes = batch.get_rowwise_shapes()
         samples = self._draw_samples(len(shapes), random_state)
+        smgen = _ElasticTfShiftMapGenerator()
+        shift_maps = smgen.generate(shapes, samples.alphas, samples.sigmas,
+                                    samples.random_state)
 
-        for i, shape in enumerate(shapes):
-            dx, dy = self._generate_shift_maps(
-                shape[0:2],
-                alpha=samples.alphas[i],
-                sigma=samples.sigmas[i],
-                random_state=samples.random_states[i])
-
+        for i, (shape, (dx, dy)) in enumerate(zip(shapes, shift_maps)):
             if batch.images is not None:
                 batch.images[i] = self._augment_image_by_samples(
                     batch.images[i], i, samples, dx, dy)
@@ -4365,7 +4454,7 @@ class ElasticTransformation(meta.Augmenter):
         cval = max(min(samples.cvals[row_idx], max_value), min_value)
 
         input_dtype = image.dtype
-        if image.dtype.name == "float16":
+        if image.dtype == iadt._FLOAT16_DTYPE:
             image = image.astype(np.float32)
 
         image_aug = self._map_coordinates(
@@ -4374,7 +4463,7 @@ class ElasticTransformation(meta.Augmenter):
             cval=cval,
             mode=samples.modes[row_idx])
 
-        if image.dtype.name != input_dtype.name:
+        if image.dtype != input_dtype:
             image_aug = iadt.restore_dtypes_(image_aug, input_dtype)
         return image_aug
 
@@ -4521,40 +4610,7 @@ class ElasticTransformation(meta.Augmenter):
         """See :func:`~imgaug.augmenters.meta.Augmenter.get_parameters`."""
         return [self.alpha, self.sigma, self.order, self.cval, self.mode]
 
-    @classmethod
-    def _generate_shift_maps(cls, shape, alpha, sigma, random_state):
-        # pylint: disable=protected-access, invalid-name
-        assert len(shape) == 2, ("Expected 2d shape, got %s." % (shape,))
-
-        ksize = blur_lib._compute_gaussian_blur_ksize(sigma)
-        ksize = ksize + 1 if ksize % 2 == 0 else ksize
-
-        padding = ksize
-        h, w = shape[0:2]
-        h_pad = h + 2*padding
-        w_pad = w + 2*padding
-
-        # The step of random number generation could be batched, so that
-        # random numbers are sampled once for the whole batch. Would get rid
-        # of creating many random_states.
-        dxdy_unsmoothed = random_state.random((2 * h_pad, w_pad)) * 2 - 1
-
-        dx_unsmoothed = dxdy_unsmoothed[0:h_pad, :]
-        dy_unsmoothed = dxdy_unsmoothed[h_pad:, :]
-
-        # TODO could this also work with an average blur? would probably be
-        #      faster
-        dx = blur_lib.blur_gaussian_(dx_unsmoothed, sigma) * alpha
-        dy = blur_lib.blur_gaussian_(dy_unsmoothed, sigma) * alpha
-
-        if padding > 0:
-            dx = dx[padding:-padding, padding:-padding]
-            dy = dy[padding:-padding, padding:-padding]
-
-        return dx, dy
-
-    @classmethod
-    def _map_coordinates(cls, image, dx, dy, order=1, cval=0, mode="constant"):
+    def _map_coordinates(self, image, dx, dy, order=1, cval=0, mode="constant"):
         """Remap pixels in an image according to x/y shift maps.
 
         **Supported dtypes**:
@@ -4672,47 +4728,39 @@ class ElasticTransformation(meta.Augmenter):
         if image.size == 0:
             return np.copy(image)
 
-        if order == 0 and image.dtype.name in ["uint64", "int64"]:
+        if (order == 0
+                and image.dtype
+                in {iadt._UINT64_DTYPE, iadt._INT64_DTYPE}):
             raise Exception(
                 "dtypes uint64 and int64 are only supported in "
                 "ElasticTransformation for order=0, got order=%d with "
                 "dtype=%s." % (order, image.dtype.name))
 
         input_dtype = image.dtype
-        if image.dtype.name == "bool":
+        if image.dtype.kind == "b":
             image = image.astype(np.float32)
-        elif order == 1 and image.dtype.name in ["int8", "int16", "int32"]:
+        elif (order == 1
+              and image.dtype
+              in {iadt._INT8_DTYPE, iadt._INT16_DTYPE, iadt._INT32_DTYPE}):
             image = image.astype(np.float64)
-        elif order >= 2 and image.dtype.name == "int8":
+        elif order >= 2 and image.dtype == iadt._INT8_DTYPE:
             image = image.astype(np.int16)
-        elif order >= 2 and image.dtype.name == "int32":
+        elif order >= 2 and image.dtype == iadt._INT32_DTYPE:
             image = image.astype(np.float64)
 
         shrt_max = 32767  # maximum of datatype `short`
         backend = "cv2"
         if order == 0:
-            bad_dtype_cv2 = (
-                image.dtype.name in [
-                    "uint32", "uint64",
-                    "int64",
-                    "float128",
-                    "bool"]
+            bad_dtype_cv2 = image.dtype in iadt._convert_dtype_strs_to_types(
+                "uint32 uint64 int64 float128 bool"
             )
         elif order == 1:
-            bad_dtype_cv2 = (
-                image.dtype.name in [
-                    "uint32", "uint64",
-                    "int8", "int16", "int32", "int64",
-                    "float128",
-                    "bool"]
+            bad_dtype_cv2 = image.dtype in iadt._convert_dtype_strs_to_types(
+                "uint32 uint64 int8 int16 int32 int64 float128 bool"
             )
         else:
-            bad_dtype_cv2 = (
-                image.dtype.name in [
-                    "uint32", "uint64",
-                    "int8", "int32", "int64",
-                    "float128",
-                    "bool"]
+            bad_dtype_cv2 = image.dtype in iadt._convert_dtype_strs_to_types(
+                "uint32 uint64 int8 int32 int64 float128 bool"
             )
 
         bad_dx_shape_cv2 = (dx.shape[0] >= shrt_max or dx.shape[1] >= shrt_max)
@@ -4722,16 +4770,23 @@ class ElasticTransformation(meta.Augmenter):
 
         assert image.ndim == 3, (
             "Expected 3-dimensional image, got %d dimensions." % (image.ndim,))
-        result = np.copy(image)
-        height, width = image.shape[0:2]
-        if backend == "scipy":
-            h, w = image.shape[0:2]
+
+        h, w, nb_channels = image.shape
+        last = self._last_meshgrid
+        if last is not None and last[0].shape == (h, w):
+            y, x = self._last_meshgrid
+        else:
             y, x = np.meshgrid(
                 np.arange(h).astype(np.float32),
                 np.arange(w).astype(np.float32),
-                indexing="ij")
-            x_shifted = x + (-1) * dx
-            y_shifted = y + (-1) * dy
+                indexing="ij"
+            )
+            self._last_meshgrid = (y, x)
+        x_shifted = x - dx
+        y_shifted = y - dy
+
+        if backend == "scipy":
+            result = np.empty_like(image)
 
             for c in sm.xrange(image.shape[2]):
                 remapped_flat = ndimage.interpolation.map_coordinates(
@@ -4741,24 +4796,16 @@ class ElasticTransformation(meta.Augmenter):
                     cval=cval,
                     mode=mode
                 )
-                remapped = remapped_flat.reshape((height, width))
+                remapped = remapped_flat.reshape((h, w))
                 result[..., c] = remapped
         else:
-            h, w, nb_channels = image.shape
-
-            y, x = np.meshgrid(
-                np.arange(h).astype(np.float32),
-                np.arange(w).astype(np.float32),
-                indexing="ij")
-            x_shifted = x + (-1) * dx
-            y_shifted = y + (-1) * dy
-
             if image.dtype.kind == "f":
                 cval = float(cval)
             else:
                 cval = int(cval)
-            border_mode = cls._MAPPING_MODE_SCIPY_CV2[mode]
-            interpolation = cls._MAPPING_ORDER_SCIPY_CV2[order]
+
+            border_mode = self._MAPPING_MODE_SCIPY_CV2[mode]
+            interpolation = self._MAPPING_ORDER_SCIPY_CV2[order]
 
             is_nearest_neighbour = (interpolation == cv2.INTER_NEAREST)
             map1, map2 = cv2.convertMaps(
@@ -4766,10 +4813,15 @@ class ElasticTransformation(meta.Augmenter):
                 nninterpolation=is_nearest_neighbour)
             # remap only supports up to 4 channels
             if nb_channels <= 4:
+                # dst does not seem to improve performance here
                 result = cv2.remap(
                     _normalize_cv2_input_arr_(image),
-                    map1, map2, interpolation=interpolation,
-                    borderMode=border_mode, borderValue=(cval, cval, cval))
+                    map1,
+                    map2,
+                    interpolation=interpolation,
+                    borderMode=border_mode,
+                    borderValue=tuple([cval] * nb_channels)
+                )
                 if image.ndim == 3 and result.ndim == 2:
                     result = result[..., np.newaxis]
             else:
@@ -4787,10 +4839,137 @@ class ElasticTransformation(meta.Augmenter):
                     current_chan_idx += 4
                 result = np.concatenate(result, axis=2)
 
-        if result.dtype.name != input_dtype.name:
+        if result.dtype != input_dtype:
             result = iadt.restore_dtypes_(result, input_dtype)
 
         return result
+
+
+class _ElasticTransformationSamplingResult(object):
+    def __init__(self, random_state, alphas, sigmas, orders, cvals, modes):
+        self.random_state = random_state
+        self.alphas = alphas
+        self.sigmas = sigmas
+        self.orders = orders
+        self.cvals = cvals
+        self.modes = modes
+
+
+class _ElasticTfShiftMapGenerator(object):
+    """Class to generate shift/displacement maps for ElasticTransformation.
+
+    This class re-uses samples for multiple examples. This minimizes the amount
+    of sampling that has to be done.
+
+    Added in 0.5.0.
+
+    """
+
+    # Not really necessary to have this as a class, considering it has no
+    # attributes. But it makes things easier to read.
+    # Added in 0.5.0.
+    def __init__(self):
+        pass
+
+    # Added in 0.5.0.
+    def generate(self, shapes, alphas, sigmas, random_state):
+        # We will sample shift maps from [0.0, 1.0] and then shift by -0.5 to
+        # [-0.5, 0.5]. To bring these maps to [-1.0, 1.0], we have to multiply
+        # somewhere by 2. It is fastes to multiply the (fewer) alphas, which
+        # we will have to multiply the shift maps with anyways.
+        alphas *= 2
+
+        # Configuration for each chunk.
+        # switch dx / dy, flip dx lr, flip dx ud, flip dy lr, flip dy ud
+        switch = [False, True]
+        fliplr_dx = [False, True]
+        flipud_dx = [False, True]
+        fliplr_dy = [False, True]
+        flipud_dy = [False, True]
+        configs = list(
+            itertools.product(
+                switch, fliplr_dx, flipud_dx, fliplr_dy, flipud_dy
+            )
+        )
+
+        areas = [shape[0] * shape[1] for shape in shapes]
+        nb_chunks = len(configs)
+        gen = zip(
+            self._split_chunks(shapes, nb_chunks),
+            self._split_chunks(areas, nb_chunks),
+            self._split_chunks(alphas, nb_chunks),
+            self._split_chunks(sigmas, nb_chunks)
+        )
+        # "_c" denotes a chunk here
+        for shapes_c, areas_c, alphas_c, sigmas_c in gen:
+            area_max = max(areas_c)
+
+            dxdy = random_state.random((2, area_max))
+            dxdy -= 0.5
+            dx, dy = dxdy[0, :], dxdy[1, :]
+
+            # dx_lr = flip dx left-right, dx_ud = flip dx up-down
+            # dy_lr, dy_ud analogous
+            for i, (switch_i, dx_lr, dx_ud, dy_lr, dy_ud) in enumerate(configs):
+                if i >= len(shapes_c):
+                    break
+
+                dx_i, dy_i = (dx, dy) if not switch_i else (dy, dx)
+                shape_i = shapes_c[i][0:2]
+                area_i = shape_i[0] * shape_i[1]
+
+                if area_i == 0:
+                    yield (
+                        np.zeros(shape_i, dtype=np.float32),
+                        np.zeros(shape_i, dtype=np.float32)
+                    )
+                else:
+                    dx_i = dx_i[0:area_i].reshape(shape_i)
+                    dy_i = dy_i[0:area_i].reshape(shape_i)
+                    dx_i, dy_i = self._flip(dx_i, dy_i,
+                                            (dx_lr, dx_ud, dy_lr, dy_ud))
+                    dx_i, dy_i = self._mul_alpha(dx_i, dy_i, alphas_c[i])
+                    yield self._smoothen_(dx_i, dy_i, sigmas_c[i])
+
+    # Added in 0.5.0.
+    @classmethod
+    def _flip(cls, dx, dy, flips):
+        # no measureable benefit from using cv2 here
+        if flips[0]:
+            dx = np.fliplr(dx)
+        if flips[1]:
+            dx = np.flipud(dx)
+        if flips[2]:
+            dy = np.fliplr(dy)
+        if flips[3]:
+            dy = np.flipud(dy)
+        return dx, dy
+
+    # Added in 0.5.0.
+    @classmethod
+    def _mul_alpha(cls, dx, dy, alpha):
+        # performance drops for cv2.multiply here
+        dx = dx * alpha
+        dy = dy * alpha
+        return dx, dy
+
+    # Added in 0.5.0.
+    @classmethod
+    def _smoothen_(cls, dx, dy, sigma):
+        if sigma < 1.5:
+            dx = blur_lib.blur_gaussian_(dx, sigma)
+            dy = blur_lib.blur_gaussian_(dy, sigma)
+        else:
+            ksize = int(round(2*sigma))
+            dx = cv2.blur(dx, (ksize, ksize), dst=dx)
+            dy = cv2.blur(dy, (ksize, ksize), dst=dy)
+        return dx, dy
+
+    # Added in 0.5.0.
+    @classmethod
+    def _split_chunks(cls, iterable, chunk_size):
+        for i in sm.xrange(0, len(iterable), chunk_size):
+            yield iterable[i:i+chunk_size]
 
 
 class Rot90(meta.Augmenter):
@@ -5170,16 +5349,13 @@ class WithPolarWarping(meta.Augmenter):
     # Added in 0.4.0.
     def _augment_batch_(self, batch, random_state, parents, hooks):
         if batch.images is not None:
-            iadt.gate_dtypes(
+            iadt.gate_dtypes_strs(
                 batch.images,
-                allowed=["bool",
-                         "uint8", "uint16",
-                         "int8", "int16", "int32",
-                         "float16", "float32", "float64"],
-                disallowed=["uint32", "uint64", "uint128", "uint256",
-                            "int64", "int128", "int256",
-                            "float96", "float128", "float256"],
-                augmenter=self)
+                allowed="bool uint8 uint16 int8 int16 int32 float16 float32 "
+                        "float64",
+                disallowed="uint32 uint64 int64 float128",
+                augmenter=self
+            )
 
         with batch.propagation_hooks_ctx(self, hooks, parents):
             batch, inv_data_bbs = self._convert_bbs_to_polygons_(batch)
@@ -5372,10 +5548,10 @@ class WithPolarWarping(meta.Augmenter):
                 shapes_orig.append(arr.shape)
                 continue
 
-            input_dtype = arr.dtype.name
-            if input_dtype == "bool":
+            input_dtype = arr.dtype
+            if input_dtype.kind == "b":
                 arr = arr.astype(np.uint8) * 255
-            elif input_dtype == "float16":
+            elif input_dtype == iadt._FLOAT16_DTYPE:
                 arr = arr.astype(np.float32)
 
             height, width = arr.shape[0:2]
@@ -5403,9 +5579,9 @@ class WithPolarWarping(meta.Augmenter):
                 if arr_warped.ndim == 2 and arr.ndim == 3:
                     arr_warped = arr_warped[:, :, np.newaxis]
 
-            if input_dtype == "bool":
+            if input_dtype.kind == "b":
                 arr_warped = (arr_warped > 128)
-            elif input_dtype == "float16":
+            elif input_dtype == iadt._FLOAT16_DTYPE:
                 arr_warped = arr_warped.astype(np.float16)
 
             arrays_warped.append(arr_warped)
@@ -5433,10 +5609,10 @@ class WithPolarWarping(meta.Augmenter):
                 arrays_inv.append(arr_warped)
                 continue
 
-            input_dtype = arr_warped.dtype.name
-            if input_dtype == "bool":
+            input_dtype = arr_warped.dtype
+            if input_dtype.kind == "b":
                 arr_warped = arr_warped.astype(np.uint8) * 255
-            elif input_dtype == "float16":
+            elif input_dtype == iadt._FLOAT16_DTYPE:
                 arr_warped = arr_warped.astype(np.float32)
 
             height, width = shape_orig[0:2]
@@ -5467,9 +5643,9 @@ class WithPolarWarping(meta.Augmenter):
                 if arr_inv.ndim == 2 and arr_warped.ndim == 3:
                     arr_inv = arr_inv[:, :, np.newaxis]
 
-            if input_dtype == "bool":
+            if input_dtype.kind == "b":
                 arr_inv = (arr_inv > 128)
-            elif input_dtype == "float16":
+            elif input_dtype == iadt._FLOAT16_DTYPE:
                 arr_inv = arr_inv.astype(np.float16)
 
             arrays_inv.append(arr_inv)

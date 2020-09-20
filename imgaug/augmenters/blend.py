@@ -54,28 +54,7 @@ def blend_alpha(image_fg, image_bg, alpha, eps=1e-2):
 
     **Supported dtypes**:
 
-        * ``uint8``: yes; fully tested
-        * ``uint16``: yes; fully tested
-        * ``uint32``: yes; fully tested
-        * ``uint64``: yes; fully tested (1)
-        * ``int8``: yes; fully tested
-        * ``int16``: yes; fully tested
-        * ``int32``: yes; fully tested
-        * ``int64``: yes; fully tested (1)
-        * ``float16``: yes; fully tested
-        * ``float32``: yes; fully tested
-        * ``float64``: yes; fully tested (1)
-        * ``float128``: no (2)
-        * ``bool``: yes; fully tested (2)
-
-        - (1) Tests show that these dtypes work, but a conversion to
-              ``float128`` happens, which only has 96 bits of size instead of
-              true 128 bits and hence not twice as much resolution. It is
-              possible that these dtypes result in inaccuracies, though the
-              tests did not indicate that.
-        - (2) Not available due to the input dtype having to be increased to
-              an equivalent float dtype with two times the input resolution.
-        - (3) Mapped internally to ``float16``.
+    See :func:`imgaug.augmenters.blend.blend_alpha_`.
 
     Parameters
     ----------
@@ -108,19 +87,101 @@ def blend_alpha(image_fg, image_bg, alpha, eps=1e-2):
         Blend of foreground and background image.
 
     """
+    return blend_alpha_(np.copy(image_fg), image_bg, alpha, eps=eps)
+
+
+def blend_alpha_(image_fg, image_bg, alpha, eps=1e-2):
+    """
+    Blend two images in-place using an alpha blending.
+
+    In alpha blending, the two images are naively mixed using a multiplier.
+    Let ``A`` be the foreground image and ``B`` the background image and
+    ``a`` is the alpha value. Each pixel intensity is then computed as
+    ``a * A_ij + (1-a) * B_ij``.
+
+    Added in 0.5.0. (Extracted from :func:`blend_alpha`.)
+
+    **Supported dtypes**:
+
+        * ``uint8``: yes; fully tested
+        * ``uint16``: yes; fully tested
+        * ``uint32``: yes; fully tested
+        * ``uint64``: limited; fully tested (1)
+        * ``int8``: yes; fully tested
+        * ``int16``: yes; fully tested
+        * ``int32``: yes; fully tested
+        * ``int64``: limited; fully tested (1)
+        * ``float16``: yes; fully tested
+        * ``float32``: yes; fully tested
+        * ``float64``: limited; fully tested (1)
+        * ``float128``: no (2)
+        * ``bool``: yes; fully tested (2)
+
+        - (1) Tests show that these dtypes work, but a conversion to
+              ``float128`` happens, which only has 96 bits of size instead of
+              true 128 bits and hence not twice as much resolution. It is
+              possible that these dtypes result in inaccuracies, though the
+              tests did not indicate that.
+              Note that ``float128`` support is required for these dtypes
+              and thus they are not expected to work on Windows machines.
+        - (2) Not available due to the input dtype having to be increased to
+              an equivalent float dtype with two times the input resolution.
+        - (3) Mapped internally to ``float16``.
+
+    Parameters
+    ----------
+    image_fg : (H,W,[C]) ndarray
+        Foreground image. Shape and dtype kind must match the one of the
+        background image.
+        This image might be modified in-place.
+
+    image_bg : (H,W,[C]) ndarray
+        Background image. Shape and dtype kind must match the one of the
+        foreground image.
+
+    alpha : number or iterable of number or ndarray
+        The blending factor, between ``0.0`` and ``1.0``. Can be interpreted
+        as the opacity of the foreground image. Values around ``1.0`` result
+        in only the foreground image being visible. Values around ``0.0``
+        result in only the background image being visible. Multiple alphas
+        may be provided. In these cases, there must be exactly one alpha per
+        channel in the foreground/background image. Alternatively, for
+        ``(H,W,C)`` images, either one ``(H,W)`` array or an ``(H,W,C)``
+        array of alphas may be provided, denoting the elementwise alpha value.
+
+    eps : number, optional
+        Controls when an alpha is to be interpreted as exactly ``1.0`` or
+        exactly ``0.0``, resulting in only the foreground/background being
+        visible and skipping the actual computation.
+
+    Returns
+    -------
+    image_blend : (H,W,C) ndarray
+        Blend of foreground and background image.
+        This might be an in-place modified version of `image_fg`.
+
+    """
     assert image_fg.shape == image_bg.shape, (
         "Expected foreground and background images to have the same shape. "
         "Got %s and %s." % (image_fg.shape, image_bg.shape))
     assert image_fg.dtype.kind == image_bg.dtype.kind, (
         "Expected foreground and background images to have the same dtype "
         "kind. Got %s and %s." % (image_fg.dtype.kind, image_bg.dtype.kind))
-    # TODO switch to gate_dtypes()
-    assert image_fg.dtype.name not in ["float128"], (
-        "Foreground image was float128, but blend_alpha() cannot handle that "
-        "dtype.")
-    assert image_bg.dtype.name not in ["float128"], (
-        "Background image was float128, but blend_alpha() cannot handle that "
-        "dtype.")
+
+    # Note: If float128 is not available on the system, _FLOAT128_DTYPE is
+    # None, but 'np.dtype("float64") == None' actually equates to True
+    # for whatever reason, so we check first if the constant is not None
+    # (i.e. if float128 exists).
+    if iadt._FLOAT128_DTYPE is not None:
+        assert image_fg.dtype != iadt._FLOAT128_DTYPE, (
+            "Foreground image was float128, but blend_alpha_() cannot handle "
+            "that dtype.")
+        assert image_bg.dtype != iadt._FLOAT128_DTYPE, (
+            "Background image was float128, but blend_alpha_() cannot handle "
+            "that dtype.")
+
+    if image_fg.size == 0:
+        return image_fg
 
     input_was_2d = (image_fg.ndim == 2)
     if input_was_2d:
@@ -144,7 +205,6 @@ def blend_alpha(image_fg, image_bg, alpha, eps=1e-2):
                 "of the foreground and background image. Got shape %s vs "
                 "foreground/background shape %s." % (
                     alpha.shape, image_fg.shape))
-            alpha = alpha.reshape((alpha.shape[0], alpha.shape[1], 1))
         elif alpha.ndim == 3:
             assert (
                 alpha.shape == image_fg.shape
@@ -155,25 +215,139 @@ def blend_alpha(image_fg, image_bg, alpha, eps=1e-2):
                         alpha.shape, image_fg.shape))
         else:
             alpha = alpha.reshape((1, 1, -1))
-        if alpha.shape[2] != image_fg.shape[2]:
-            alpha = np.tile(alpha, (1, 1, image_fg.shape[2]))
 
     if not input_was_bool:
         if np.all(alpha >= 1.0 - eps):
             if input_was_2d:
                 image_fg = image_fg[..., 0]
-            return np.copy(image_fg)
+            return image_fg
         if np.all(alpha <= eps):
             if input_was_2d:
                 image_bg = image_bg[..., 0]
+            # use copy() here so that only image_fg has to be copied in
+            # blend_alpha()
             return np.copy(image_bg)
 
-    # for efficiency reaons, only test one value of alpha here, even if alpha
+    # for efficiency reasons, only test one value of alpha here, even if alpha
     # is much larger
     if alpha.size > 0:
         assert 0 <= alpha.item(0) <= 1.0, (
             "Expected 'alpha' value(s) to be in the interval [0.0, 1.0]. "
             "Got min %.4f and max %.4f." % (np.min(alpha), np.max(alpha)))
+
+    uint8 = iadt._UINT8_DTYPE
+    both_uint8 = (image_fg.dtype, image_bg.dtype) == (uint8, uint8)
+    if both_uint8:
+        if alpha.size == 1:
+            image_blend = _blend_alpha_uint8_single_alpha_(
+                image_fg, image_bg, float(alpha), inplace=True
+            )
+        elif alpha.shape == (1, 1, image_fg.shape[2]):
+            image_blend = _blend_alpha_uint8_channelwise_alphas_(
+                image_fg, image_bg, alpha[0, 0, :]
+            )
+        else:
+            image_blend = _blend_alpha_uint8_elementwise_(
+                image_fg, image_bg, alpha
+            )
+    else:
+        image_blend = _blend_alpha_non_uint8(image_fg, image_bg, alpha)
+
+    if input_was_bool:
+        image_blend = image_blend > 0.5
+
+    if input_was_2d:
+        return image_blend[:, :, 0]
+    return image_blend
+
+
+# Added in 0.5.0.
+def _blend_alpha_uint8_single_alpha_(image_fg, image_bg, alpha, inplace):
+    # here we are not guarantueed that inputs have ndim=3, can be ndim=2
+    result = cv2.addWeighted(
+        _normalize_cv2_input_arr_(image_fg),
+        alpha,
+        _normalize_cv2_input_arr_(image_bg),
+        beta=(1 - alpha),
+        gamma=0.0,
+        dst=image_fg if inplace else None
+    )
+    if result.ndim == 2 and image_fg.ndim == 3:
+        return result[:, :, np.newaxis]
+    return result
+
+
+# Added in 0.5.0.
+def _blend_alpha_uint8_channelwise_alphas_(image_fg, image_bg, alphas):
+    # we are guarantueed here that image_fg and image_bg have ndim=3
+    result = []
+    for i, alpha in enumerate(alphas):
+        result.append(
+            _blend_alpha_uint8_single_alpha_(
+                image_fg[:, :, i],
+                image_bg[:, :, i],
+                float(alpha),
+                inplace=False
+            )
+        )
+
+    image_blend = _merge_channels(result, image_fg.ndim == 3)
+    return image_blend
+
+
+# Added in 0.5.0.
+def _blend_alpha_uint8_elementwise_(image_fg, image_bg, alphas):
+    betas = 1.0 - alphas
+
+    is_2d = (alphas.ndim == 2 or alphas.shape[2] == 1)
+    area = image_fg.shape[0] * image_fg.shape[1]
+    if is_2d and area >= 64*64:
+        if alphas.ndim == 3:
+            alphas = alphas[:, :, 0]
+            betas = betas[:, :, 0]
+
+        result = []
+        for c in range(image_fg.shape[2]):
+            image_fg_mul = image_fg[:, :, c]
+            image_bg_mul = image_bg[:, :, c]
+            image_fg_mul = cv2.multiply(image_fg_mul, alphas, dtype=cv2.CV_8U)
+            image_bg_mul = cv2.multiply(image_bg_mul, betas, dtype=cv2.CV_8U)
+            image_fg_mul = cv2.add(image_fg_mul, image_bg_mul, dst=image_fg_mul)
+            result.append(image_fg_mul)
+
+        image_blend = _merge_channels(result, image_fg.ndim == 3)
+        return image_blend
+    else:
+        if alphas.ndim == 2:
+            alphas = alphas[..., np.newaxis]
+            betas = betas[..., np.newaxis]
+        if alphas.shape[2] != image_fg.shape[2]:
+            alphas = np.tile(alphas, (1, 1, image_fg.shape[2]))
+            betas = np.tile(betas, (1, 1, image_fg.shape[2]))
+
+        alphas = alphas.ravel()
+        betas = betas.ravel()
+        input_shape = image_fg.shape
+
+        image_fg_mul = image_fg.ravel()
+        image_bg_mul = image_bg.ravel()
+        image_fg_mul = cv2.multiply(
+            image_fg_mul, alphas, dtype=cv2.CV_8U, dst=image_fg_mul
+        )
+        image_bg_mul = cv2.multiply(
+            image_bg_mul, betas, dtype=cv2.CV_8U, dst=image_bg_mul
+        )
+
+        image_fg_mul = cv2.add(image_fg_mul, image_bg_mul, dst=image_fg_mul)
+
+        return image_fg_mul.reshape(input_shape)
+
+
+# Added in 0.5.0.
+# (Extracted from blend_alpha().)
+def _blend_alpha_non_uint8(image_fg, image_bg, alpha):
+    if alpha.ndim == 2:
+        alpha = alpha[:, :, np.newaxis]
 
     dt_images = iadt.get_minimal_dtype([image_fg, image_bg])
 
@@ -183,31 +357,51 @@ def blend_alpha(image_fg, image_bg, alpha, eps=1e-2):
     # faster than float16
     isize = dt_images.itemsize * 2
     isize = max(isize, 4)
-    dt_blend = np.dtype("f%d" % (isize,))
+    dt_name = "f%d" % (isize,)
 
-    if alpha.dtype.name != dt_blend.name:
+    # check if float128 (16*8=128) is supported
+    assert dt_name != "f16" or hasattr(np, "float128"), (
+        "The input images use dtype '%s', for which alpha-blending "
+        "requires float128 support to compute accurately its output, "
+        "but float128 seems to not be available on the current "
+        "system." % (image_fg.dtype.name,)
+    )
+
+    dt_blend = np.dtype(dt_name)
+
+    if alpha.dtype != dt_blend:
         alpha = alpha.astype(dt_blend)
-    if image_fg.dtype.name != dt_blend.name:
+    if image_fg.dtype != dt_blend:
         image_fg = image_fg.astype(dt_blend)
-    if image_bg.dtype.name != dt_blend.name:
+    if image_bg.dtype != dt_blend:
         image_bg = image_bg.astype(dt_blend)
 
-    # the following is equivalent to
+    # the following is
+    #     image_blend = image_bg + alpha * (image_fg - image_bg)
+    # which is equivalent to
     #     image_blend = alpha * image_fg + (1 - alpha) * image_bg
     # but supposedly faster
-    image_blend = image_bg + alpha * (image_fg - image_bg)
+    image_blend = image_fg - image_bg
+    image_blend *= alpha
+    image_blend += image_bg
 
-    if input_was_bool:
-        image_blend = image_blend > 0.5
+    # Skip clip, because alpha is expected to be in range [0.0, 1.0] and
+    # both images must have same dtype.
+    # Dont skip round, because otherwise it is very unlikely to hit the
+    # image's max possible value
+    image_blend = iadt.restore_dtypes_(
+        image_blend, dt_images, clip=False, round=True)
+
+    return image_blend
+
+
+def _merge_channels(channels, input_was_3d):
+    if len(channels) <= 512:
+        image_blend = cv2.merge(channels)
     else:
-        # skip clip, because alpha is expected to be in range [0.0, 1.0] and
-        # both images must have same dtype dont skip round, because otherwise
-        # it is very unlikely to hit the image's max possible value
-        image_blend = iadt.restore_dtypes_(
-            image_blend, dt_images, clip=False, round=True)
-
-    if input_was_2d:
-        return image_blend[:, :, 0]
+        image_blend = np.stack(channels, axis=-1)
+    if image_blend.ndim == 2 and input_was_3d:
+        image_blend = image_blend[:, :, np.newaxis]
     return image_blend
 
 
@@ -285,7 +479,7 @@ class BlendAlpha(meta.Augmenter):
 
     **Supported dtypes**:
 
-    See :func:`~imgaug.augmenters.blend.blend_alpha`.
+    See :func:`~imgaug.augmenters.blend.blend_alpha_`.
 
     Parameters
     ----------
@@ -455,9 +649,9 @@ class BlendAlpha(meta.Augmenter):
 
             # blend images
             if batch.images is not None:
-                batch.images[i] = blend_alpha(batch_fg.images[i],
-                                              batch_bg.images[i],
-                                              alphas_i, eps=self.epsilon)
+                batch.images[i] = blend_alpha_(batch_fg.images[i],
+                                               batch_bg.images[i],
+                                               alphas_i, eps=self.epsilon)
 
             # blend non-images
             # TODO Use gradual blending for heatmaps here (as for images)?
@@ -537,7 +731,7 @@ class BlendAlphaMask(meta.Augmenter):
 
     **Supported dtypes**:
 
-    See :func:`~imgaug.augmenters.blend.blend_alpha`.
+    See :func:`~imgaug.augmenters.blend.blend_alpha_`.
 
     Parameters
     ----------
@@ -656,16 +850,16 @@ class BlendAlphaMask(meta.Augmenter):
 
         for i, mask in enumerate(masks):
             if batch.images is not None:
-                batch.images[i] = blend_alpha(batch_fg.images[i],
-                                              batch_bg.images[i],
-                                              mask, eps=self.epsilon)
+                batch.images[i] = blend_alpha_(batch_fg.images[i],
+                                               batch_bg.images[i],
+                                               mask, eps=self.epsilon)
 
             if batch.heatmaps is not None:
                 arr = batch.heatmaps[i].arr_0to1
                 arr_height, arr_width = arr.shape[0:2]
                 mask_binarized = self._binarize_mask(mask,
                                                      arr_height, arr_width)
-                batch.heatmaps[i].arr_0to1 = blend_alpha(
+                batch.heatmaps[i].arr_0to1 = blend_alpha_(
                     batch_fg.heatmaps[i].arr_0to1,
                     batch_bg.heatmaps[i].arr_0to1,
                     mask_binarized, eps=self.epsilon)
@@ -675,7 +869,7 @@ class BlendAlphaMask(meta.Augmenter):
                 arr_height, arr_width = arr.shape[0:2]
                 mask_binarized = self._binarize_mask(mask,
                                                      arr_height, arr_width)
-                batch.segmentation_maps[i].arr = blend_alpha(
+                batch.segmentation_maps[i].arr = blend_alpha_(
                     batch_fg.segmentation_maps[i].arr,
                     batch_bg.segmentation_maps[i].arr,
                     mask_binarized, eps=self.epsilon)
@@ -2416,7 +2610,7 @@ class StochasticParameterMaskGen(IBatchwiseMaskGenerator):
 
         """
         shapes = batch.get_rowwise_shapes()
-        random_state = iarandom.RNG(random_state)
+        random_state = iarandom.RNG.create_if_not_rng_(random_state)
         per_channel = self.per_channel.draw_samples((len(shapes),),
                                                     random_state=random_state)
 
@@ -2586,7 +2780,7 @@ class SomeColorsMaskGen(IBatchwiseMaskGenerator):
         assert batch.images is not None, (
             "Can only generate masks for batches that contain images, but "
             "got a batch without images.")
-        random_state = iarandom.RNG(random_state)
+        random_state = iarandom.RNG.create_if_not_rng_(random_state)
         samples = self._draw_samples(batch, random_state=random_state)
 
         return [self._draw_mask(image, i, samples)
@@ -2770,7 +2964,7 @@ class _LinearGradientMaskGen(IBatchwiseMaskGenerator):
         Added in 0.4.0.
 
         """
-        random_state = iarandom.RNG(random_state)
+        random_state = iarandom.RNG.create_if_not_rng_(random_state)
         shapes = batch.get_rowwise_shapes()
         samples = self._draw_samples(len(shapes), random_state=random_state)
 
@@ -3150,7 +3344,7 @@ class RegularGridMaskGen(IBatchwiseMaskGenerator):
         Added in 0.4.0.
 
         """
-        random_state = iarandom.RNG(random_state)
+        random_state = iarandom.RNG.create_if_not_rng_(random_state)
         shapes = batch.get_rowwise_shapes()
         nb_rows, nb_cols, alpha = self._draw_samples(len(shapes),
                                                      random_state=random_state)
@@ -3312,7 +3506,7 @@ class CheckerboardMaskGen(IBatchwiseMaskGenerator):
 
         """
         # pylint: disable=protected-access
-        random_state = iarandom.RNG(random_state)
+        random_state = iarandom.RNG.create_if_not_rng_(random_state)
         shapes = batch.get_rowwise_shapes()
         nb_rows, nb_cols, _alpha = self.grid._draw_samples(
             len(shapes), random_state=random_state)
@@ -3462,7 +3656,7 @@ class SegMapClassIdsMaskGen(IBatchwiseMaskGenerator):
         assert batch.segmentation_maps is not None, (
             "Can only generate masks for batches that contain segmentation "
             "maps, but got a batch without them.")
-        random_state = iarandom.RNG(random_state)
+        random_state = iarandom.RNG.create_if_not_rng_(random_state)
         class_ids = self._draw_samples(batch.nb_rows,
                                        random_state=random_state)
 
@@ -3626,7 +3820,7 @@ class BoundingBoxesMaskGen(IBatchwiseMaskGenerator):
         assert batch.bounding_boxes is not None, (
             "Can only generate masks for batches that contain bounding boxes, "
             "but got a batch without them.")
-        random_state = iarandom.RNG(random_state)
+        random_state = iarandom.RNG.create_if_not_rng_(random_state)
 
         if self.labels is None:
             return [self.generate_mask(bbsoi, None)
@@ -3731,7 +3925,7 @@ class InvertMaskGen(IBatchwiseMaskGenerator):
         Added in 0.4.0.
 
         """
-        random_state = iarandom.RNG(random_state)
+        random_state = iarandom.RNG.create_if_not_rng_(random_state)
         masks = self.child.draw_masks(batch, random_state=random_state)
         p = self.p.draw_samples(len(masks), random_state=random_state)
         for mask, p_i in zip(masks, p):

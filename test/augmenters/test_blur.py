@@ -192,6 +192,43 @@ class Test_blur_gaussian_(unittest.TestCase):
                               - image_scipy[..., c].astype(np.int32))
                 assert np.average(diff) < 0.05 * (size * size)
 
+    def test_view(self):
+        for backend in ["auto", "scipy", "cv2"]:
+            image = np.array([
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 255, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [1, 1, 1, 1, 1]
+            ], dtype=np.uint8)
+            image_cp = np.copy(image[0:5, :])
+
+            image_aug = iaa.blur_gaussian_(image[0:5, :], 3.0, backend=backend)
+
+            assert image_aug.shape == (5, 5)
+            assert image_aug.dtype.name == "uint8"
+            assert np.all(image_aug[image_cp == 0] > 0)
+            assert np.all(image_aug[image_cp == 255] < 255)
+
+    def test_non_contiguous(self):
+        for backend in ["auto", "scipy", "cv2"]:
+            image = np.array([
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 255, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0]
+            ], dtype=np.uint8, order="F")
+            image_cp = np.copy(image)
+
+            image_aug = iaa.blur_gaussian_(image, 3.0, backend=backend)
+
+            assert image_aug.shape == (5, 5)
+            assert image_aug.dtype.name == "uint8"
+            assert np.all(image_aug[image_cp == 0] > 0)
+            assert np.all(image_aug[image_cp == 255] < 255)
+
     def test_warnings(self):
         # note that self.assertWarningRegex does not exist in python 2.7
         with warnings.catch_warnings(record=True) as caught_warnings:
@@ -209,15 +246,20 @@ class Test_blur_gaussian_(unittest.TestCase):
                 in str(caught_warnings[-1].message))
 
     def test_other_dtypes_sigma_0(self):
+        try:
+            f128 = [np.dtype("float128").name]
+        except TypeError:
+            f128 = []
+
         dtypes_to_test_list = [
             ["bool",
              "uint8", "uint16", "uint32", "uint64",
              "int8", "int16", "int32", "int64",
-             "float16", "float32", "float64", "float128"],
+             "float16", "float32", "float64"] + f128,
             ["bool",
              "uint8", "uint16", "uint32", "uint64",
              "int8", "int16", "int32", "int64",
-             "float16", "float32", "float64", "float128"]
+             "float16", "float32", "float64"] + f128
         ]
         gen = zip(["scipy", "cv2"], dtypes_to_test_list)
 
@@ -249,7 +291,7 @@ class Test_blur_gaussian_(unittest.TestCase):
                         assert np.all(image_aug == image)
 
             # float
-            float_dts = [np.float16, np.float32, np.float64, np.float128]
+            float_dts = [np.float16, np.float32, np.float64] + f128
             for dtype in float_dts:
                 dtype = np.dtype(dtype)
                 if dtype.name in dtypes_to_test:
@@ -328,7 +370,7 @@ class Test_blur_gaussian_(unittest.TestCase):
                             assert np.max(diff) <= 0.01 * dynamic_range
 
             # float
-            float_dts = [np.float16, np.float32, np.float64, np.float128]
+            float_dts = [np.float16, np.float32, np.float64]
             values = [5000, 1000**1, 1000**2, 1000**3]
             for dtype, value in zip(float_dts, values):
                 dtype = np.dtype(dtype)
@@ -339,8 +381,8 @@ class Test_blur_gaussian_(unittest.TestCase):
                         image_aug = iaa.blur_gaussian_(
                             image, sigma=0.75, backend=backend)
                         expected = (mask * value).astype(dtype)
-                        diff = np.abs(image_aug.astype(np.float128)
-                                      - expected.astype(np.float128))
+                        diff = np.abs(image_aug.astype(np.float64)
+                                      - expected.astype(np.float64))
                         assert image_aug.shape == mask.shape
                         assert image_aug.dtype.type == dtype
                         # accepts difference of 2.0, 4.0, 8.0, 16.0 (at 1,
@@ -348,7 +390,8 @@ class Test_blur_gaussian_(unittest.TestCase):
                         max_diff = (
                             np.dtype(dtype).itemsize
                             * 0.01
-                            * np.float128(value))
+                            * np.float64(value)
+                        )
                         assert np.max(diff) < max_diff
 
     def test_other_dtypes_bool_at_sigma_06(self):
@@ -388,6 +431,100 @@ class Test_blur_gaussian_(unittest.TestCase):
             assert image_aug.shape == mask_bool.shape
             assert image_aug.dtype.type == np.bool_
             assert np.all(image_aug == expected)
+
+
+class Test_blur_avg_(unittest.TestCase):
+    @classmethod
+    def _avg(cls, values):
+        return int(np.round(np.average(values)))
+
+    def test_kernel_size_is_int(self):
+        # reflection padded:
+        # [6, 5, 6, 7, 8, 7],
+        # [2, 1, 2, 3, 4, 3],
+        # [6, 5, 6, 7, 8, 7],
+        # [10, 9, 10, 11, 12, 11],
+        # [14, 13, 14, 15, 16, 15]
+        # [10, 9, 10, 11, 12, 11],
+        image = np.array([
+            [1, 2, 3, 4],
+            [5, 6, 7, 8],
+            [9, 10, 11, 12],
+            [13, 14, 15, 16]
+        ], dtype=np.uint8)
+
+        image_aug = iaa.blur_avg_(np.copy(image), 3)
+
+        assert image_aug[0, 0] == self._avg([6, 5, 6, 2, 1, 2, 6, 5, 6])
+        assert image_aug[0, 1] == self._avg([5, 6, 7, 1, 2, 3, 5, 6, 7])
+        assert image_aug[3, 3] == self._avg([11, 12, 11, 15, 16, 15, 11, 12,
+                                             11])
+
+    def test_kernel_size_is_tuple(self):
+        # reflection padded:
+        # [6, 5, 6, 7, 8, 7],
+        # [2, 1, 2, 3, 4, 3],
+        # [6, 5, 6, 7, 8, 7],
+        # [10, 9, 10, 11, 12, 11],
+        # [14, 13, 14, 15, 16, 15]
+        # [10, 9, 10, 11, 12, 11],
+        image = np.array([
+            [1, 2, 3, 4],
+            [5, 6, 7, 8],
+            [9, 10, 11, 12],
+            [13, 14, 15, 16]
+        ], dtype=np.uint8)
+
+        image_aug = iaa.blur_avg_(np.copy(image), (3, 1))
+
+        assert image_aug[0, 0] == self._avg([5, 1, 5])
+        assert image_aug[0, 1] == self._avg([6, 2, 6])
+        assert image_aug[3, 3] == self._avg([12, 16, 12])
+
+    def test_view(self):
+        # reflection padded (after crop):
+        # [6, 5, 6, 7, 8, 7],
+        # [2, 1, 2, 3, 4, 3],
+        # [6, 5, 6, 7, 8, 7],
+        # [10, 9, 10, 11, 12, 11],
+        # [14, 13, 14, 15, 16, 15]
+        # [10, 9, 10, 11, 12, 11],
+        image = np.array([
+            [1, 2, 3, 4],
+            [5, 6, 7, 8],
+            [9, 10, 11, 12],
+            [13, 14, 15, 16],
+            [0, 0, 0, 0]
+        ], dtype=np.uint8)
+
+        image_aug = iaa.blur_avg_(np.copy(image)[0:4, :], 3)
+
+        assert image_aug[0, 0] == self._avg([6, 5, 6, 2, 1, 2, 6, 5, 6])
+        assert image_aug[0, 1] == self._avg([5, 6, 7, 1, 2, 3, 5, 6, 7])
+        assert image_aug[3, 3] == self._avg([11, 12, 11, 15, 16, 15, 11, 12,
+                                             11])
+
+    def test_noncontiguous(self):
+        # reflection padded:
+        # [6, 5, 6, 7, 8, 7],
+        # [2, 1, 2, 3, 4, 3],
+        # [6, 5, 6, 7, 8, 7],
+        # [10, 9, 10, 11, 12, 11],
+        # [14, 13, 14, 15, 16, 15]
+        # [10, 9, 10, 11, 12, 11],
+        image = np.array([
+            [1, 2, 3, 4],
+            [5, 6, 7, 8],
+            [9, 10, 11, 12],
+            [13, 14, 15, 16]
+        ], dtype=np.uint8, order="F")
+
+        image_aug = iaa.blur_avg_(image, 3)
+
+        assert image_aug[0, 0] == self._avg([6, 5, 6, 2, 1, 2, 6, 5, 6])
+        assert image_aug[0, 1] == self._avg([5, 6, 7, 1, 2, 3, 5, 6, 7])
+        assert image_aug[3, 3] == self._avg([11, 12, 11, 15, 16, 15, 11, 12,
+                                             11])
 
 
 class Test_blur_mean_shift_(unittest.TestCase):
@@ -695,8 +832,8 @@ class TestGaussianBlur(unittest.TestCase):
             image[2, 2] = 100.0
             image_aug = aug.augment_image(image)
             expected = mask.astype(dtype)
-            diff = np.abs(image_aug.astype(np.float128)
-                          - expected.astype(np.float128))
+            diff = np.abs(image_aug.astype(np.float64)
+                          - expected.astype(np.float64))
             assert image_aug.shape == mask.shape
             assert image_aug.dtype.type == dtype
             assert np.max(diff) < 4
@@ -743,8 +880,8 @@ class TestGaussianBlur(unittest.TestCase):
             image[2, 2] = 100.0
             image_aug = aug.augment_image(image)
             expected = mask.astype(dtype)
-            diff = np.abs(image_aug.astype(np.float128)
-                          - expected.astype(np.float128))
+            diff = np.abs(image_aug.astype(np.float64)
+                          - expected.astype(np.float64))
             assert image_aug.shape == mask.shape
             assert image_aug.dtype.type == dtype
             assert np.max(diff) < 4.0
@@ -801,15 +938,21 @@ class TestGaussianBlur(unittest.TestCase):
             image[2, 2] = value
             image_aug = aug.augment_image(image)
             expected = (mask * value).astype(dtype)
-            diff = np.abs(image_aug.astype(np.float128)
-                          - expected.astype(np.float128))
+            diff = np.abs(image_aug.astype(np.float64)
+                          - expected.astype(np.float64))
             assert image_aug.shape == mask.shape
             assert image_aug.dtype.type == dtype
             # accepts difference of 2.0, 4.0, 8.0, 16.0 (at 1, 2, 4, 8 bytes,
             # i.e. 8, 16, 32, 64 bit)
-            max_diff = np.dtype(dtype).itemsize * 0.01 * np.float128(value)
+            max_diff = np.dtype(dtype).itemsize * 0.01 * np.float64(value)
             assert np.max(diff) < max_diff
 
+    # float128 is the only unsupported dtype (excluding non-numerics and
+    # complex dtypes)
+    @unittest.skipIf(
+        not hasattr(np, "float128"),
+        "Test can only be executed on systems that know numpy.float128"
+    )
     def test_failure_on_invalid_dtypes(self):
         # assert failure on invalid dtypes
         aug = iaa.GaussianBlur(sigma=1.0)
@@ -1134,8 +1277,8 @@ class TestAverageBlur(unittest.TestCase):
             image[2, 2] = 100.0
             image_aug = aug.augment_image(image)
             expected = (mask * 100.0).astype(dtype)
-            diff = np.abs(image_aug.astype(np.float128)
-                          - expected.astype(np.float128))
+            diff = np.abs(image_aug.astype(np.float64)
+                          - expected.astype(np.float64))
             assert image_aug.dtype.type == dtype
             assert np.max(diff) < 1.0
 
@@ -1186,8 +1329,8 @@ class TestAverageBlur(unittest.TestCase):
             image[2, 2] = value
             image_aug = aug.augment_image(image)
             expected = (mask * value).astype(dtype)
-            diff = np.abs(image_aug.astype(np.float128)
-                          - expected.astype(np.float128))
+            diff = np.abs(image_aug.astype(np.float64)
+                          - expected.astype(np.float64))
             assert image_aug.dtype.type == dtype
             # accepts difference of 2.0, 4.0, 8.0, 16.0 (at 1, 2, 4, 8 bytes,
             # i.e. 8, 16, 32, 64 bit)
