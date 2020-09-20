@@ -1,0 +1,17 @@
+```
+
+
+origin master is two separate things, origin is a remote, master is a local branch
+origin/master is one thing: is a remote branch, which is a copy of branch "master" on remote origin.
+```
+
+
+git fetch origin master && git merge origin/master =====> git pull origin master
+
+
+
+Technically, the -u flag adds a tracking reference to the upstream server you're pushing to.
+
+Technically, the `-u` flag adds a tracking reference to the upstream server you're pushing to.
+
+For example, once you are doing a `git push -u origin master`, you'll be able to later call `git pull` and `git will` understand that you indeed meant `git pull origin master`.
